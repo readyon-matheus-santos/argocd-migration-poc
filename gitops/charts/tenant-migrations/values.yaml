@@ -1,0 +1,33 @@
+releaseId: r0
+# Earlier releases whose migrations already completed; kept in the marker so
+# pods of those releases (rollback, coexisting canary/stable) still pass the gate.
+previousReleaseIds: []
+
+db:
+  host: postgres
+  port: 5432
+  secretName: postgres-creds
+
+image:
+  repository: postgres
+  tag: "16"
+
+# One migration Job per entry. Services sharing a db get consecutive hook
+# sync-waves in list order (serialized); a db used by one service stays at
+# wave 0 (runs in parallel with wave 0 of other groups).
+services:
+  - name: backend
+    db: main
+    version: v1
+    sleepSeconds: 2
+    fail: false
+  - name: subgraph-a
+    db: main
+    version: v1
+    sleepSeconds: 2
+    fail: false
+  - name: subgraph-b
+    db: subgraph_b
+    version: v1
+    sleepSeconds: 2
+    fail: false

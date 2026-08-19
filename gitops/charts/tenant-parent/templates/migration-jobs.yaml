@@ -1,0 +1,97 @@
+{{- /* PreSync hooks of the PARENT: one migration Job per service, in the tenant namespace, image/version read from the per-service tenant file. */ -}}
+{{- $dbs := dict "backend" "main" "subgraph-a" "main" "subgraph-b" "subgraph_b" -}}
+{{- $svcs := list "backend" "subgraph-a" "subgraph-b" -}}
+{{- $parsed := dict -}}
+{{- range $name := $svcs -}}{{- $_ := set $parsed $name ((index $.Values.tenantFiles $name | default "") | fromYaml) -}}{{- end -}}
+{{- $releaseId := (get (get $parsed "backend") "releaseId") | default "r0" -}}
+{{- $counts := dict -}}
+{{- range $name := $svcs -}}
+{{- $db := get $dbs $name -}}
+{{- $_ := set $counts $db (add (get $counts $db | default 0) 1) -}}
+{{- end -}}
+{{- $seen := dict -}}
+{{- range $name := $svcs }}
+{{- $cfg := get $parsed $name -}}
+{{- $mig := (get $cfg "migrations") | default dict -}}
+{{- $db := get $dbs $name -}}
+{{- $wave := 0 -}}
+{{- if gt (int (get $counts $db)) 1 -}}
+{{- $wave = int (get $seen $db | default 0) -}}
+{{- $_ := set $seen $db (add $wave 1) -}}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-{{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/name: tenant-parent
+    service: {{ $name | quote }}
+    release-id: {{ $releaseId | quote }}
+    job-role: migration
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: {{ $wave | quote }}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tenant-parent
+        service: {{ $name | quote }}
+        release-id: {{ $releaseId | quote }}
+        job-role: migration
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          env:
+            - name: PGHOST
+              value: {{ $.Values.db.host | quote }}
+            - name: PGPORT
+              value: {{ $.Values.db.port | quote }}
+            - name: PGDATABASE
+              value: {{ $db | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.db.secretName }}
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.db.secretName }}
+                  key: password
+            - name: SLEEP_SECONDS
+              value: {{ (get $mig "sleepSeconds") | default 2 | quote }}
+            - name: FAIL
+              value: {{ (get $mig "fail") | default false | quote }}
+            - name: SVC_NAME
+              value: {{ $name | quote }}
+            - name: VERSION
+              value: {{ (get $cfg "version") | quote }}
+            - name: RELEASE_ID
+              value: {{ $releaseId | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              TABLE="schema_version_$(echo "${SVC_NAME}" | tr '-' '_')"
+              i=0; until pg_isready -q; do i=$((i+2)); [ "$i" -ge 120 ] && { echo "db not ready after 120s"; exit 1; }; sleep 2; done
+              echo "migrate[${SVC_NAME}] release=${RELEASE_ID} version=${VERSION} db=${PGDATABASE} sleep=${SLEEP_SECONDS} fail=${FAIL}"
+              psql -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS ${TABLE}(version text, applied_at timestamptz DEFAULT now());"
+              psql -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS migration_log(svc text, release_id text, version text, started_at timestamptz, finished_at timestamptz);"
+              psql -v ON_ERROR_STOP=1 -c "INSERT INTO ${TABLE}(version) VALUES ('${VERSION}');"
+              psql -v ON_ERROR_STOP=1 -c "INSERT INTO migration_log(svc, release_id, version, started_at) VALUES ('${SVC_NAME}', '${RELEASE_ID}', '${VERSION}', now());"
+              psql -v ON_ERROR_STOP=1 -c "SELECT pg_sleep(${SLEEP_SECONDS});"
+              if [ "${FAIL}" = "true" ]; then
+                echo "migrate[${SVC_NAME}]: FAIL=true, exiting 1 (ledger row left unfinished)"
+                exit 1
+              fi
+              psql -v ON_ERROR_STOP=1 -c "UPDATE migration_log SET finished_at = now() WHERE svc='${SVC_NAME}' AND release_id='${RELEASE_ID}' AND finished_at IS NULL;"
+              echo "migrate[${SVC_NAME}]: done"
+{{- end }}

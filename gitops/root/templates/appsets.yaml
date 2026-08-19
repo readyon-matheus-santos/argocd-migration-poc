@@ -1,0 +1,19 @@
+{{- $repoURL := required "repoURL is required (supplied by the root Application's helm.parameters)" .Values.repoURL }}
+{{- $targetRevision := required "targetRevision is required (supplied by the root Application's helm.parameters)" .Values.targetRevision }}
+{{- range $path, $_ := .Files.Glob "appsets/*.yaml" }}
+{{- $name := base $path }}
+{{- $layout := $.Values.layout | default "appsets" }}
+{{- $include := false }}
+{{- if eq $layout "appofapps" }}
+{{- $include = or (eq $name "postgres.yaml") (eq $name "tenant-parent.yaml") }}
+{{- else }}
+{{- $include = and (ne $name "tenant-parent.yaml") (or (ne $name "tenant-migrations.yaml") $.Values.layer.enabled) }}
+{{- end }}
+{{- if $include }}
+{{- $content := $.Files.Get $path }}
+{{- $content = $content | replace "__REPO_URL__" $repoURL }}
+{{- $content = $content | replace "__TARGET_REVISION__" $targetRevision }}
+{{ $content }}
+---
+{{- end }}
+{{- end }}

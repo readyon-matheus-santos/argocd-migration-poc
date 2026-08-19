@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fake-service.name" . }}
+  labels:
+    {{- include "fake-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  progressDeadlineSeconds: {{ .Values.progressDeadlineSeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "fake-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "fake-service.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "fake-service.name" . }}
+      {{- if .Values.gate.enabled }}
+      initContainers:
+        - name: release-gate
+          image: "{{ .Values.gate.image.repository }}:{{ .Values.gate.image.tag }}"
+          env:
+            - name: EXPECTED
+              value: {{ .Values.releaseId | quote }}
+            - name: NS
+              value: {{ .Release.Namespace | quote }}
+            - name: INTERVAL
+              value: {{ .Values.gate.pollIntervalSeconds | quote }}
+            - name: TIMEOUT
+              value: {{ .Values.gate.timeoutSeconds | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -u
+              SA=/var/run/secrets/kubernetes.io/serviceaccount
+              TOKEN="$(cat $SA/token)"
+              URL="https://kubernetes.default.svc/api/v1/namespaces/${NS}/configmaps/migrations-complete"
+              ELAPSED=0
+              echo "release-gate: waiting for migrations-complete releaseId=${EXPECTED}"
+              while true; do
+                BODY="$(curl -sS --cacert $SA/ca.crt -H "Authorization: Bearer ${TOKEN}" "$URL" 2>/dev/null)"
+                if echo "$BODY" | grep -q "\"completed.${EXPECTED}\": *\"true\""; then
+                  echo "release-gate: marker lists completed.${EXPECTED}, proceeding"
+                  exit 0
+                fi
+                ACTUAL="$(echo "$BODY" | grep -o '"completed\.[^"]*"' | sed 's/"completed\.//;s/"//' | tr '\n' ',')"
+                echo "release-gate: marker completed=[${ACTUAL}] want '${EXPECTED}' (elapsed ${ELAPSED}s/${TIMEOUT}s)"
+                sleep "${INTERVAL}"
+                ELAPSED=$((ELAPSED + INTERVAL))
+                if [ "${ELAPSED}" -ge "${TIMEOUT}" ]; then
+                  echo "release-gate: timed out"
+                  exit 1
+                fi
+              done
+      {{- end }}
+      containers:
+        - name: {{ include "fake-service.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["/bin/sh", "-c", "echo starting version=${VERSION} release=${RELEASE_ID}; sleep infinity"]
+          env:
+            - name: VERSION
+              value: {{ .Values.version | quote }}
+            - name: RELEASE_ID
+              value: {{ .Values.releaseId | quote }}
+          readinessProbe:
+            exec:
+              command: ["true"]
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

@@ -1,0 +1,5 @@
+releaseId: r0
+version: v1
+migrations:
+  sleepSeconds: 2
+  fail: false

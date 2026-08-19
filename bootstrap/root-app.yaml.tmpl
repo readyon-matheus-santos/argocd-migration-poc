@@ -1,0 +1,31 @@
+# Rendered by bootstrap/apply-root-app.sh via sed substitution of
+# __REPO_URL__ / __GIT_BRANCH__. This Application is the ONLY place the
+# repository coordinates are materialized at runtime; every other GitOps
+# resource keeps the __REPO_URL__/__TARGET_REVISION__ placeholders and is
+# substituted by the root chart itself (see gitops/root).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: __REPO_URL__
+    targetRevision: __GIT_BRANCH__
+    path: gitops/root
+    helm:
+      parameters:
+        - name: repoURL
+          value: __REPO_URL__
+        - name: targetRevision
+          value: __GIT_BRANCH__
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

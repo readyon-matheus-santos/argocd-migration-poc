@@ -1,0 +1,13 @@
+repoURL: ""
+targetRevision: ""
+tenant: ""
+namespace: ""
+# tenantFiles.<svc> = raw content of gitops/values/_tenants/<tenant>/<svc>.yaml (helm fileParameters)
+tenantFiles: {}
+db:
+  host: postgres
+  port: 5432
+  secretName: postgres-creds
+image:
+  repository: postgres
+  tag: "16"

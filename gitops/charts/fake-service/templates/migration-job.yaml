@@ -1,0 +1,70 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "fake-service.name" . }}-migrate
+  labels:
+    {{- include "fake-service.labels" . | nindent 4 }}
+    job-role: migration
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "fake-service.labels" . | nindent 8 }}
+        job-role: migration
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag }}"
+          env:
+            - name: PGHOST
+              value: {{ .Values.db.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.db.port | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.db.name | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.secretName }}
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.secretName }}
+                  key: password
+            - name: SLEEP_SECONDS
+              value: {{ .Values.migrations.sleepSeconds | quote }}
+            - name: FAIL
+              value: {{ .Values.migrations.fail | quote }}
+            - name: SVC_NAME
+              value: {{ include "fake-service.name" . | quote }}
+            - name: VERSION
+              value: {{ .Values.version | quote }}
+            - name: RELEASE_ID
+              value: {{ .Values.releaseId | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              TABLE="schema_version_$(echo "${SVC_NAME}" | tr '-' '_')"
+              i=0; until pg_isready -q; do i=$((i+2)); [ "$i" -ge 120 ] && { echo "db not ready after 120s"; exit 1; }; sleep 2; done
+              echo "migrate[${SVC_NAME}] release=${RELEASE_ID} version=${VERSION} db=${PGDATABASE} sleep=${SLEEP_SECONDS} fail=${FAIL}"
+              psql -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS ${TABLE}(version text, applied_at timestamptz DEFAULT now());"
+              psql -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS migration_log(svc text, release_id text, version text, started_at timestamptz, finished_at timestamptz);"
+              psql -v ON_ERROR_STOP=1 -c "INSERT INTO ${TABLE}(version) VALUES ('${VERSION}');"
+              psql -v ON_ERROR_STOP=1 -c "INSERT INTO migration_log(svc, release_id, version, started_at) VALUES ('${SVC_NAME}', '${RELEASE_ID}', '${VERSION}', now());"
+              psql -v ON_ERROR_STOP=1 -c "SELECT pg_sleep(${SLEEP_SECONDS});"
+              if [ "${FAIL}" = "true" ]; then
+                echo "migrate[${SVC_NAME}]: FAIL=true, exiting 1 (ledger row left unfinished)"
+                exit 1
+              fi
+              psql -v ON_ERROR_STOP=1 -c "UPDATE migration_log SET finished_at = now() WHERE svc='${SVC_NAME}' AND release_id='${RELEASE_ID}' AND finished_at IS NULL;"
+              echo "migrate[${SVC_NAME}]: done"
+{{- end }}

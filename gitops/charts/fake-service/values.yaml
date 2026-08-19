@@ -1,0 +1,48 @@
+# Per-service identity comes from gitops/values/_base/<svc>.yaml; per-tenant
+# release state from gitops/values/_tenants/<tenant>/<svc>.yaml.
+name: ""
+version: v1
+releaseId: r0
+
+image:
+  repository: alpine
+  tag: "3.20"
+
+replicaCount: 1
+
+db:
+  name: main
+  host: postgres
+  port: 5432
+  secretName: postgres-creds
+
+# Per-service PreSync migration Job owned by THIS service's Application
+# (the S1 baseline shape). Off in the default profile: the Migrations Layer
+# carries the Jobs instead.
+migrations:
+  enabled: false
+  sleepSeconds: 2
+  fail: false
+  image:
+    repository: postgres
+    tag: "16"
+
+# Runtime Gate: init container that keeps the pod un-Ready until the
+# migrations-complete ConfigMap carries this pod's releaseId.
+gate:
+  enabled: true
+  pollIntervalSeconds: 2
+  timeoutSeconds: 600
+  image:
+    repository: curlimages/curl
+    tag: "8.10.1"
+
+progressDeadlineSeconds: 600
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi

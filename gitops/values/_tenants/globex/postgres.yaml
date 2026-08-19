@@ -1,0 +1,3 @@
+# Tenant-specific overrides for gitops/charts/postgres in tenant globex.
+# None needed today; the file exists because the AppSet's valueFiles list
+# references it unconditionally (prod parity for the $values layering).

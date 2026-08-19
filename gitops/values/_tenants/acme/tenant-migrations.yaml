@@ -1,0 +1,18 @@
+releaseId: r0
+previousReleaseIds: []
+services:
+  - name: backend
+    db: main
+    version: v1
+    sleepSeconds: 2
+    fail: false
+  - name: subgraph-a
+    db: main
+    version: v1
+    sleepSeconds: 2
+    fail: false
+  - name: subgraph-b
+    db: subgraph_b
+    version: v1
+    sleepSeconds: 2
+    fail: false

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fake-service
+description: Stand-in service Deployment (alpine + VERSION/RELEASE_ID) with optional per-app PreSync migration Job and optional release-gate init container
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

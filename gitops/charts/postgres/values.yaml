@@ -1,0 +1,21 @@
+image:
+  repository: postgres
+  tag: "16"
+
+secretName: postgres-creds
+username: poc
+# Visibly fake static default; not a real secret.
+password: poc-not-a-secret
+
+# The default POSTGRES_DB; additional DBs are created by the initdb script below.
+defaultDatabase: main
+extraDatabases:
+  - subgraph_b
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

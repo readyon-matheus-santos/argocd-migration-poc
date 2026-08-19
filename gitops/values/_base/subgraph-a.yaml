@@ -1,0 +1,7 @@
+name: subgraph-a
+db:
+  name: main
+migrations:
+  enabled: false
+gate:
+  enabled: false

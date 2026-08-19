@@ -1,0 +1,32 @@
+# Strategic merge patch applied to argocd-cm after install.
+# Fast git polling: there is no webhook path into local kind (see README),
+# so the driver relies on this short reconciliation interval plus an
+# explicit hard-refresh after every push.
+data:
+  timeout.reconciliation: 15s
+  # Custom health for child Applications (ArgoCD removed the built-in one in
+  # v1.8). Needed by the app-of-apps layout (S10) so a parent's sync-waves
+  # wait for the wave-0 migrations child to be Synced+Healthy.
+  resource.customizations.health.argoproj.io_Application: |
+    hs = {}
+    hs.status = "Progressing"
+    hs.message = "waiting for child Application"
+    if obj.status ~= nil then
+      local sync = (obj.status.sync and obj.status.sync.status) or ""
+      local health = (obj.status.health and obj.status.health.status) or ""
+      local phase = (obj.status.operationState and obj.status.operationState.phase) or ""
+      -- Synced + Healthy is Healthy even if the LAST operation failed: a
+      -- stale Failed phase survives a revert whose manifests are unchanged.
+      if sync == "Synced" and health == "Healthy" then
+        hs.status = "Healthy"
+        hs.message = ""
+        return hs
+      end
+      if health == "Degraded" or ((phase == "Failed" or phase == "Error") and sync ~= "Synced") then
+        hs.status = "Degraded"
+        hs.message = "child sync phase " .. phase .. ", health " .. health
+        return hs
+      end
+      hs.message = "sync=" .. sync .. " health=" .. health .. " phase=" .. phase
+    end
+    return hs

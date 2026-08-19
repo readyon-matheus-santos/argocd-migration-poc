@@ -1,0 +1,10 @@
+# Single-node kind cluster for the argocd-migration-poc lab.
+# No port mappings: nothing inbound is required — the ArgoCD UI is reached by
+# `kubectl port-forward` when a human wants it. The node image is substituted
+# by the bootstrap script from bootstrap/versions.env (KINDEST_NODE_IMAGE) so
+# the pin lives in exactly one place.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    image: __KINDEST_NODE_IMAGE__

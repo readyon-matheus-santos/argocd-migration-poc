@@ -1,0 +1,47 @@
+# Raw, prod-shaped ApplicationSet (not Helm-templated — see templates/appsets.yaml).
+# __REPO_URL__ / __TARGET_REVISION__ are substituted by the parent chart;
+# {{ .tenant }} etc. are this AppSet's own go-template expressions.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: postgres
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: __REPO_URL__
+        revision: __TARGET_REVISION__
+        files:
+          - path: gitops/tenants.yaml
+  template:
+    metadata:
+      name: "postgres-{{ .tenant }}"
+      annotations:
+        argocd.argoproj.io/sync-wave: "0"
+    spec:
+      project: default
+      sources:
+        - repoURL: __REPO_URL__
+          targetRevision: __TARGET_REVISION__
+          path: gitops/charts/postgres
+          helm:
+            valueFiles:
+              - $values/gitops/values/_base/postgres.yaml
+              - $values/gitops/values/_tenants/{{ .tenant }}/postgres.yaml
+            values: |
+              tenant: {{ .tenant }}
+              namespace: {{ .namespace }}
+        - repoURL: __REPO_URL__
+          targetRevision: __TARGET_REVISION__
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .namespace }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

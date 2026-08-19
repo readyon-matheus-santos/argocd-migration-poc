@@ -1,0 +1,7 @@
+# Base (tenant-independent) values for gitops/charts/postgres.
+# Currently identical to the chart defaults; kept as an explicit layer for
+# $values parity with prod (a release touching only values files must not
+# touch the app-of-apps).
+image:
+  repository: postgres
+  tag: "16"

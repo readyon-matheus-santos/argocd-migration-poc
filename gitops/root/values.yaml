@@ -1,0 +1,17 @@
+# repoURL / targetRevision are required and supplied at render time by the
+# root Application's helm.parameters (see bootstrap/root-app.yaml.tmpl) —
+# this chart is the only place gitops/ content sees the real repo URL.
+repoURL: ""
+targetRevision: ""
+
+# S1 profile switch: when false, the root template
+# omits appsets/tenant-migrations.yaml so the migrations-layer AppSet and
+# its generated apps do not exist.
+layer:
+  enabled: false
+
+# Topology switch:
+#   appsets   — harmony today: one AppSet per service, leaf apps self-sync independently
+#   appofapps — the design: one parent per tenant whose OWN PreSync hooks are the migration
+#               Jobs; children at waves 2/4 with version pinned inline
+layout: appofapps

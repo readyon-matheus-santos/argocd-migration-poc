@@ -1,0 +1,5 @@
+apiVersion: v2
+name: tenant-parent
+description: Per-tenant app-of-apps - reads the per-service tenant value files via helm fileParameters, runs the tenant migrations as its OWN PreSync hooks, then applies the child Applications (waves 2/4) with each child's version pinned inline
+type: application
+version: 0.1.0

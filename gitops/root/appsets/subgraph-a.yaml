@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: subgraph-a
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: __REPO_URL__
+        revision: __TARGET_REVISION__
+        files:
+          - path: gitops/tenants.yaml
+  template:
+    metadata:
+      name: "subgraph-a-{{ .tenant }}"
+      annotations:
+        argocd.argoproj.io/sync-wave: "4"
+    spec:
+      project: default
+      sources:
+        - repoURL: __REPO_URL__
+          targetRevision: __TARGET_REVISION__
+          path: gitops/charts/fake-service
+          helm:
+            valueFiles:
+              - $values/gitops/values/_base/subgraph-a.yaml
+              - $values/gitops/values/_tenants/{{ .tenant }}/subgraph-a.yaml
+            values: |
+              tenant: {{ .tenant }}
+              namespace: {{ .namespace }}
+        - repoURL: __REPO_URL__
+          targetRevision: __TARGET_REVISION__
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .namespace }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

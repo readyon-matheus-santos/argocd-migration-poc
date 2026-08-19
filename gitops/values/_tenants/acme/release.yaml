@@ -1,0 +1,15 @@
+releaseId: r131
+previousReleaseIds: []
+services:
+  backend:
+    version: v2
+    sleepSeconds: 30
+    fail: false
+  subgraph-a:
+    version: v2
+    sleepSeconds: 30
+    fail: false
+  subgraph-b:
+    version: v2
+    sleepSeconds: 30
+    fail: false

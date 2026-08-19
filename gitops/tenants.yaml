@@ -1,0 +1,9 @@
+# Consumed by every AppSet's git files generator (prod parity: prod's
+# nonprod-configs/tenants.yaml is consumed the same way). Adding a tenant
+# line here must produce the whole per-tenant stack for every AppSet.
+- name: acme
+  tenant: acme
+  namespace: acme
+- name: globex
+  tenant: globex
+  namespace: globex

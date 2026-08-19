@@ -1,0 +1,44 @@
+{{- $repo := required "repoURL" .Values.repoURL }}
+{{- $rev := required "targetRevision" .Values.targetRevision }}
+{{- $waves := dict "backend" "2" "subgraph-a" "4" "subgraph-b" "4" }}
+{{- $dbs := dict "backend" "main" "subgraph-a" "main" "subgraph-b" "subgraph_b" }}
+{{- $svcs := list "backend" "subgraph-a" "subgraph-b" -}}
+{{- $parsed := dict -}}
+{{- range $name := $svcs -}}{{- $_ := set $parsed $name ((index $.Values.tenantFiles $name | default "") | fromYaml) -}}{{- end -}}
+{{- $releaseId := (get (get $parsed "backend") "releaseId") | default "r0" -}}
+{{- range $name := $svcs }}
+{{- $cfg := get $parsed $name }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $name }}-{{ $.Values.tenant }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ get $waves $name | quote }}
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  sources:
+    - repoURL: {{ $repo }}
+      targetRevision: {{ $rev }}
+      path: gitops/charts/fake-service
+      helm:
+        valueFiles:
+          - $values/gitops/values/_base/{{ $name }}.yaml
+          - $values/gitops/values/_tenants/{{ $.Values.tenant }}/{{ $name }}.yaml
+        # inline pins override the tenant file (ArgoCD helm precedence: values > valueFiles),
+        # so a tenant-file bump moves the child only after the PARENT re-rendered these pins.
+        values: |
+          releaseId: {{ $releaseId }}
+          version: {{ get $cfg "version" }}
+    - repoURL: {{ $repo }}
+      targetRevision: {{ $rev }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $.Values.namespace }}
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+{{- end }}
