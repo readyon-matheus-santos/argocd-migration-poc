@@ -1,0 +1,127 @@
+# tenant-parent-harmony — the chart as it would be published to platform ECR as
+# readyon-helm-charts/tenant-parent and consumed by applicationsets/<env>/tenant-parent.yaml.
+#
+# ONE chart, TWO roles (see README):
+#   mode: parent      → the PreSync hook Application + the child Applications
+#   mode: migrations  → backend's migration Job + the state ConfigMap
+# The hook Application points back at this same chart with mode=migrations,
+# because a Job cannot cross clusters on its own: every resource of an
+# Application lands on that Application's single spec.destination.
+mode: parent
+
+# ---------------------------------------------------------------- identity ---
+# Supplied by the ApplicationSet generator (configs/tenants.yaml × configs/regions.yaml).
+tenant: ""            # armk-prod
+client: ""            # armk
+env: ""               # prod
+environmentName: ""   # production
+namespace: ""         # armk-prod
+isolationMode: isolated
+
+region:
+  shortName: ""       # use2
+  name: ""            # us-east-2
+  cluster: ""         # harmony-prod-use2  → the children's destination
+  accountId: ""       # <PROD_ACCOUNT_ID>
+  role: active        # active | standby
+  databaseRole: primary   # primary | replica  (nonprod has no such key → primary)
+  replicaMultiplier: 1.0
+
+# RAD rows only; empty on durable tenants.
+dbEnv: ""
+irsaTenant: ""
+
+# --------------------------------------------------------------- plumbing ---
+# Chart registry the children pull from, and the git repo holding the value layers.
+chartRepoURL: <PLATFORM_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com
+valuesSource:
+  repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
+  targetRevision: main
+  # nonprod-values/ or values/ — the root of this tier's value layers.
+  root: values
+
+# AppProject for the CHILDREN and the hook Application (they land on a tenant
+# cluster, so the tier↔cluster invariant applies: non-production | production).
+# The PARENT itself uses a dedicated project — see README, board decision D5.
+childProject: production
+
+# Raw contents of values/_tenants/<tenant>/<svc>-tenant.yaml, injected by the
+# ApplicationSet via helm.fileParameters. Keys are camelCase service names.
+tenantFiles: {}
+
+# ------------------------------------------------------------------ children ---
+# One entry per release-bearing service in the shared-DB group. `valueFiles` and
+# `values` are copied VERBATIM from that service's ApplicationSet today - the
+# chart never re-derives them, so a per-tier tweak stays a one-line AppSet edit
+# and "byte-for-byte identical to today" is a copy invariant we can diff.
+childDefaults:
+  syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+  # Global default; apollo-router overrides it to {} (its AppSet has none today).
+  managedNamespaceMetadata: {}
+
+children:
+  backend:
+    enabled: true
+    appName: backend           # → backend-<tenant>-<region>
+    chart: readyon-helm-charts/backend
+    targetRevision: "1.10.3"
+    wave: "2"
+    # backend's migration moves to the parent's hook, so the child must not run it
+    disableMigrations: true
+    valueFiles: []
+    values: ""
+  backendCrons:
+    enabled: true
+    appName: backend-crons
+    chart: readyon-helm-charts/backend
+    targetRevision: "1.10.3"
+    wave: "2"
+    valueFiles: []
+    values: ""
+  # The six subgraphs that READ `main` and run no migration of their own.
+  buildShift:      { enabled: true, appName: build-shift,      chart: readyon-helm-charts/graphql, targetRevision: "0.10.0", wave: "4", valueFiles: [], values: "" }
+  orgHierarchy:    { enabled: true, appName: org-hierarchy,    chart: readyon-helm-charts/graphql, targetRevision: "0.10.0", wave: "4", valueFiles: [], values: "" }
+  rbac:            { enabled: true, appName: rbac,             chart: readyon-helm-charts/graphql, targetRevision: "0.10.0", wave: "4", valueFiles: [], values: "" }
+  shiftManagement: { enabled: true, appName: shift-management, chart: readyon-helm-charts/graphql, targetRevision: "0.10.0", wave: "4", valueFiles: [], values: "" }
+  userManagement:  { enabled: true, appName: user-management,  chart: readyon-helm-charts/graphql, targetRevision: "0.10.0", wave: "4", valueFiles: [], values: "" }
+  workRule:        { enabled: true, appName: work-rule,        chart: readyon-helm-charts/graphql, targetRevision: "0.10.0", wave: "4", valueFiles: [], values: "" }
+  # Other `main` readers (board decision D8 — they read main_prod today and are
+  # release-bearing, so leaving them out breaks the stated guarantee).
+  notificationsOrchestrator: { enabled: true, appName: notifications-orchestrator, chart: readyon-helm-charts/notifications-orchestrator, targetRevision: "0.5.0", wave: "3", valueFiles: [], values: "" }
+  monitoringCronjobs:        { enabled: true, appName: monitoring-cronjobs,        chart: readyon-helm-charts/monitoring-cronjobs,        targetRevision: "0.4.0", wave: "4", valueFiles: [], values: "" }
+  apolloRouter:
+    enabled: true
+    appName: apollo-router
+    chart: readyon-helm-charts/apollo-router
+    targetRevision: "1.11.2"
+    wave: "5"
+    managedNamespaceMetadata: {}   # prod's AppSet has none — keep it that way
+    valueFiles: []
+    values: ""
+
+# ----------------------------------------------------------- the migration ---
+migrations:
+  enabled: true
+  # Which child's image tag the migration runs with (backend owns `main`).
+  from: backend
+  # The hook Application's own retry. 0 = exactly one migration attempt per
+  # parent attempt, so parent retries are not multiplied by app retries.
+  retryLimit: 0
+  # mode=migrations only: rendered from the backend chart's own values so the
+  # Job matches what backend runs today (TLS toggles, pgBouncer bypass, RAD wait).
+  job:
+    backoffLimit: 3
+    activeDeadlineSeconds: 10800
+    ttlSecondsAfterFinished: 300
+    command: ["npm", "run", "db:migrate"]
+    env: {}
+    externalSecretName: ""    # <fullname>-migrations-db-secrets
+    image: ""                 # resolved from the tenant file's image.tag
+    repository: ""            # e.g. <NONPROD_ACCOUNT_ID>.dkr.ecr.../readyon-backend

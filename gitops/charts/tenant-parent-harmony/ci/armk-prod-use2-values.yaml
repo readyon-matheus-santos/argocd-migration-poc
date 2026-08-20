@@ -1,0 +1,95 @@
+# Fixture: what applicationsets/prod/tenant-parent.yaml passes for armk-prod / use2.
+# Used by `helm template -f ci/...` so the chart is provably renderable, and as the
+# reference for the byte-for-byte diff against today's generated Applications.
+tenant: armk-prod
+client: armk
+env: prod
+environmentName: production
+namespace: armk-prod
+isolationMode: isolated
+childProject: production
+valuesSource:
+  repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
+  targetRevision: main
+  root: values
+region:
+  shortName: use2
+  name: us-east-2
+  cluster: harmony-prod-use2
+  accountId: "<PROD_ACCOUNT_ID>"
+  role: active
+  databaseRole: primary
+  replicaMultiplier: 1.0
+
+tenantFiles:
+  backend: |
+    image:
+      repository: readyon-backend
+      tag: v1.0.7-prod-20260817-235744-4105f710
+  rbac: |
+    enabled: true
+    image:
+      tag: v1.0.7-prod-20260817-235744-4105f710
+
+children:
+  backend:
+    enabled: true
+    appName: backend
+    chart: readyon-helm-charts/backend
+    targetRevision: "1.10.3"
+    wave: "2"
+    disableMigrations: true
+    valueFiles:
+      - $values/values/_base/backend.yaml
+      - $values/values/shared-prod.yaml
+      - $values/values/_regions/use2/backend-region.yaml
+      - $values/values/_tenants/armk-prod/backend-tenant.yaml
+    values: |
+      aws:
+        accountId: "<PROD_ACCOUNT_ID>"
+        region: "us-east-2"
+      environment: "prod"
+      client: "armk"
+      isolationMode: isolated
+    managedNamespaceMetadata:
+      labels:
+        tenant: armk-prod
+        environment: prod
+        managed-by: argocd
+  rbac:
+    enabled: true
+    appName: rbac
+    chart: readyon-helm-charts/graphql
+    targetRevision: "0.10.0"
+    wave: "4"
+    valueFiles:
+      - $values/values/_base/rbac.yaml
+      - $values/values/shared-prod.yaml
+      - $values/values/_regions/use2/rbac-region.yaml
+      - $values/values/_tenants/armk-prod/rbac-tenant.yaml
+    values: |
+      environment: "prod"
+      client: "armk"
+  backendCrons: { enabled: false }
+  buildShift: { enabled: false }
+  orgHierarchy: { enabled: false }
+  shiftManagement: { enabled: false }
+  userManagement: { enabled: false }
+  workRule: { enabled: false }
+  notificationsOrchestrator: { enabled: false }
+  monitoringCronjobs: { enabled: false }
+  apolloRouter: { enabled: false }
+
+migrations:
+  enabled: true
+  from: backend
+  retryLimit: 0
+  job:
+    backoffLimit: 3
+    activeDeadlineSeconds: 10800
+    ttlSecondsAfterFinished: 300
+    repository: <PROD_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/readyon-backend
+    externalSecretName: backend-migrations-db-secrets
+    env:
+      TYPEORM_SSL_MODE: "true"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"

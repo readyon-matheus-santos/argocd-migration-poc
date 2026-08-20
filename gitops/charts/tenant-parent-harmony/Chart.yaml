@@ -1,0 +1,6 @@
+apiVersion: v2
+name: tenant-parent-harmony
+description: What ships to readyon-harmony - one parent Application per tenant/region that runs the shared-DB migration as a PreSync hook Application and then applies the tenant's service Applications in wave order
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

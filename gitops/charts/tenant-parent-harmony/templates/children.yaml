@@ -1,0 +1,82 @@
+{{- if eq (.Values.mode | default "parent") "parent" }}
+{{- /*
+The tenant's service Applications, rendered in the parent's Sync phase — so they
+are applied only after the PreSync hook (the migration) succeeded.
+
+Each child reproduces exactly what its per-service ApplicationSet generates
+today: same name, project, chart pin, $values layer chain, inline values,
+destination, syncPolicy, ignoreDifferences and labels. The chart adds two things
+and nothing else: the Application envelope, and the image.tag pin taken from the
+tenant file. `valueFiles`/`values` are passed through verbatim from the AppSet
+rather than re-derived here, so a per-tier tweak stays a one-line AppSet edit.
+
+No resources-finalizer on children (board D2): with prune:true on the parent, a
+child that stops rendering — router disabled, a subgraph moving off `main`, a
+rename — would otherwise cascade-delete live workload instead of being orphaned.
+*/ -}}
+{{- $root := . }}
+{{- range $key, $cfg := .Values.children }}
+{{- if eq (include "tp.enabled" (dict "cfg" $cfg)) "true" }}
+{{- $tag := include "tp.tag" (dict "root" $root "key" $key "required" false) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ include "tp.childName" (dict "root" $root "cfg" $cfg) }}
+  namespace: argocd
+  labels:
+    {{- include "tp.labels" (dict "root" $root "cfg" $cfg) | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $cfg.wave | quote }}
+spec:
+  project: {{ $root.Values.childProject | quote }}
+  sources:
+    - repoURL: {{ $root.Values.chartRepoURL | quote }}
+      chart: {{ $cfg.chart | quote }}
+      targetRevision: {{ $cfg.targetRevision | quote }}
+      helm:
+        {{- with $cfg.valueFiles }}
+        valueFiles:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ignoreMissingValueFiles: true
+        {{- with $cfg.values }}
+        values: |
+          {{- . | trimSuffix "\n" | nindent 10 }}
+        {{- end }}
+        parameters:
+          {{- if $tag }}
+          # Highest-precedence pin. The tenant file still carries image.tag for
+          # the release bot to write; this is what actually moves the child, and
+          # only the parent can set it — which is what makes the ordering hold.
+          - name: image.tag
+            value: {{ $tag | quote }}
+          {{- end }}
+          {{- if $cfg.disableMigrations }}
+          - name: migrations.enabled
+            value: "false"
+          {{- end }}
+    - repoURL: {{ $root.Values.valuesSource.repoURL | quote }}
+      targetRevision: {{ $root.Values.valuesSource.targetRevision | quote }}
+      ref: values
+  destination:
+    name: {{ $root.Values.region.cluster | quote }}
+    namespace: {{ $root.Values.namespace | quote }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      {{- toYaml $root.Values.childDefaults.syncOptions | nindent 6 }}
+    {{- $mnm := $cfg.managedNamespaceMetadata | default $root.Values.childDefaults.managedNamespaceMetadata }}
+    {{- with $mnm }}
+    managedNamespaceMetadata:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- with $root.Values.childDefaults.ignoreDifferences }}
+  ignoreDifferences:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

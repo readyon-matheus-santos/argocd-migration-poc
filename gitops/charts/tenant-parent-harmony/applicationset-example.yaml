@@ -1,0 +1,158 @@
+# Goes to readyon-harmony as applicationsets/prod/tenant-parent.yaml
+# (nonprod mirror: project non-production, floating chart range, and the
+# nonprod-configs/ + rad-environments.yaml generators).
+#
+# This is the ONLY new ApplicationSet. It replaces the per-service AppSets of the
+# shared-DB group; every other AppSet in harmony stays exactly as it is.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tenant-parent-prod
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
+              revision: main
+              files:
+                - path: configs/tenants.yaml
+              # Opt-in per tenant. "pending" un-generates the per-service apps
+              # without creating the parent yet, so "old apps gone" is observable
+              # before the hand-over (board D3).
+              selector:
+                matchExpressions:
+                  - key: tenantParentEnabled
+                    operator: In
+                    values: ["true"]
+          - git:
+              repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
+              revision: main
+              files:
+                - path: configs/regions.yaml
+
+  # Deleting a parent must never take its children's workloads with it. The
+  # controller only injects resources-finalizer when the template carries none,
+  # so this stays effective ONLY while the template below has no finalizers.
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+
+  template:
+    metadata:
+      name: 'tenant-{{.tenant}}-{{.shortName}}'
+      labels:
+        app: tenant-parent
+        tenant: '{{.client}}'
+        env: '{{.env}}'
+        region: '{{.shortName}}'
+    spec:
+      # Dedicated project: the parent writes Application objects into the
+      # platform cluster's argocd namespace, which `non-production` must not be
+      # allowed to reach (board D5). Its children keep production/non-production.
+      project: tenant-parents-prod
+
+      sources:
+        - repoURL: <PLATFORM_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com
+          chart: readyon-helm-charts/tenant-parent
+          targetRevision: "REPLACE-WITH-EXACT-CHART-VERSION"   # B7: prod never floats
+          helm:
+            # The parent reads the SAME per-service tenant files the release bot
+            # already writes. No new file, no tenant-file restructure, release
+            # pipeline unchanged. Keys are camelCase to match the chart.
+            fileParameters:
+              - name: tenantFiles.backend
+                path: $values/values/_tenants/{{.tenant}}/backend-tenant.yaml
+              - name: tenantFiles.backendCrons
+                path: $values/values/_tenants/{{.tenant}}/backend-crons-tenant.yaml
+              - name: tenantFiles.buildShift
+                path: $values/values/_tenants/{{.tenant}}/build-shift-tenant.yaml
+              - name: tenantFiles.orgHierarchy
+                path: $values/values/_tenants/{{.tenant}}/org-hierarchy-tenant.yaml
+              - name: tenantFiles.rbac
+                path: $values/values/_tenants/{{.tenant}}/rbac-tenant.yaml
+              - name: tenantFiles.shiftManagement
+                path: $values/values/_tenants/{{.tenant}}/shift-management-tenant.yaml
+              - name: tenantFiles.userManagement
+                path: $values/values/_tenants/{{.tenant}}/user-management-tenant.yaml
+              - name: tenantFiles.workRule
+                path: $values/values/_tenants/{{.tenant}}/work-rule-tenant.yaml
+              - name: tenantFiles.notificationsOrchestrator
+                path: $values/values/_tenants/{{.tenant}}/notifications-orchestrator-tenant.yaml
+              - name: tenantFiles.monitoringCronjobs
+                path: $values/values/_tenants/{{.tenant}}/monitoring-cronjobs-tenant.yaml
+              - name: tenantFiles.apolloRouter
+                path: $values/values/_tenants/{{.tenant}}/apollo-router-tenant.yaml
+            values: |
+              tenant: {{.tenant}}
+              client: {{.client}}
+              env: {{.env}}
+              environmentName: {{.environmentName}}
+              namespace: {{.namespace}}
+              isolationMode: {{.isolationMode | default "isolated"}}
+              childProject: production
+              region:
+                shortName: {{.shortName}}
+                name: {{.regionName}}
+                cluster: {{.cluster}}
+                accountId: "{{.accountId}}"
+                role: {{.role | default "active"}}
+                databaseRole: {{.databaseRole | default "primary"}}
+                replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+              # children.<svc>.valueFiles / .values are copied VERBATIM from each
+              # service's current ApplicationSet — see the chart README.
+              children:
+                backend:
+                  valueFiles:
+                    - $values/values/_base/backend.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/backend-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/backend-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                # … one block per service, each a verbatim copy of its AppSet's
+                #    valueFiles + inline values.
+              migrations:
+                from: backend
+                retryLimit: 0
+                job:
+                  repository: {{.accountId}}.dkr.ecr.{{.regionName}}.amazonaws.com/readyon-backend
+                  externalSecretName: backend-migrations-db-secrets
+                  env:
+                    TYPEORM_SSL_MODE: "true"
+                    NODE_TLS_REJECT_UNAUTHORIZED: "0"
+
+        - repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
+          targetRevision: main
+          ref: values
+
+      # The parent holds Application objects, so it targets the cluster ArgoCD
+      # runs on — not the tenant's cluster. Its children and its migration hook
+      # carry the tenant cluster as their own destination.
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+
+      # NO metadata.finalizers here: an explicit finalizer survives
+      # preserveResourcesOnDeletion, and un-flagging a tenant would then cascade
+      # parent → children → live Deployments (board D2).
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        # A failed migration is rarely transient, but a RAD clone or a
+        # just-promoted DR writer can be. One parent retry = one fresh migration
+        # attempt, because the hook Application itself is retryLimit 0.
+        retry:
+          limit: 3
+          backoff:
+            duration: 60s
+            maxDuration: 15m

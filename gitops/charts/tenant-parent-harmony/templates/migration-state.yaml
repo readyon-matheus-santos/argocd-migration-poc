@@ -1,0 +1,30 @@
+{{- if eq (.Values.mode | default "parent") "migrations" }}
+{{- $j := .Values.migrations.job }}
+{{- /*
+The hook Application's only NON-hook resource, and it is load-bearing twice over.
+
+1. Without it the app manages nothing, so ArgoCD reports it Synced/Healthy on
+   creation and never runs a sync — the Job never fires and the parent's PreSync
+   "succeeds" with nothing migrated. Demonstrated in this lab: children rolled,
+   migration_log untouched, every Application green.
+2. It is what makes a FAILED migration visible. App health is computed over the
+   compared (non-hook) resources; with this ConfigMap left unapplied the app is
+   not Synced, so the health customization returns Degraded and the parent's
+   PreSync fails instead of proceeding.
+
+The hash makes migration-only changes (A7 TLS toggles, backoffLimit, deadlines)
+move the app even when the image tag is unchanged — board D15.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-migration-state
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: backend-migrations
+data:
+  releaseTag: {{ $j.image | quote }}
+  service: {{ .Values.migrations.from | quote }}
+  database: {{ printf "%s_main_%s" .Values.client (.Values.dbEnv | default .Values.env) | quote }}
+  migrationsHash: {{ $j | toYaml | sha256sum | trunc 16 | quote }}
+{{- end }}
