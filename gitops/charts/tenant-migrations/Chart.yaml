@@ -1,6 +1,0 @@
-apiVersion: v2
-name: tenant-migrations
-description: Per-tenant Migrations Layer - every service's migration Job as a PreSync hook (same-DB Jobs serialized by hook waves) plus the migrations-complete Release Marker applied in the Sync phase
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

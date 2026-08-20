@@ -7,7 +7,7 @@
 {{- if eq $layout "appofapps" }}
 {{- $include = or (eq $name "postgres.yaml") (eq $name "tenant-parent.yaml") }}
 {{- else }}
-{{- $include = and (ne $name "tenant-parent.yaml") (or (ne $name "tenant-migrations.yaml") $.Values.layer.enabled) }}
+{{- $include = ne $name "tenant-parent.yaml" }}
 {{- end }}
 {{- if $include }}
 {{- $content := $.Files.Get $path }}

@@ -1,3 +1,4 @@
+{{- if eq (.Values.mode | default "parent") "parent" }}
 {{- /*
 The tenant's migrations, as a PreSync hook *Application* rather than a Job.
 A Job cannot be used here: hooks are resources of the parent, so they land on
@@ -30,9 +31,10 @@ spec:
   sources:
     - repoURL: {{ .Values.repoURL }}
       targetRevision: {{ .Values.targetRevision }}
-      path: gitops/charts/tenant-migrations
+      path: gitops/charts/tenant-parent
       helm:
         values: |
+          mode: migrations
           releaseId: {{ $releaseId }}
           services:
           {{- range $name := $svcs }}
@@ -55,3 +57,4 @@ spec:
     syncOptions: [CreateNamespace=true]
     retry:
       limit: 0
+{{- end }}

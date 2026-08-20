@@ -1,3 +1,11 @@
+# Which role this chart plays. The same chart is used twice:
+#   parent      — renders the PreSync hook Application + the child Applications
+#   migrations  — renders the migration Jobs + the state ConfigMap, i.e. what the
+#                 hook Application above points at (same chart path, mode flipped)
+# Two roles rather than two charts, because a Job cannot cross clusters on its own:
+# every resource of an Application lands on that Application's single destination.
+mode: parent
+
 repoURL: ""
 targetRevision: ""
 tenant: ""
@@ -6,6 +14,17 @@ namespace: ""
 # In the two-cluster lab this is the workload cluster, mirroring harmony where
 # ArgoCD runs on the platform cluster and tenants live elsewhere.
 childCluster: ""
+
+# Consumed only in mode=migrations (passed by the hook Application).
+releaseId: r0
+services: []
+db:
+  host: postgres
+  port: 5432
+  secretName: postgres-creds
+image:
+  repository: postgres
+  tag: "16"
 # tenantFiles.<svc> = raw content of gitops/values/_tenants/<tenant>/<svc>.yaml (helm fileParameters)
 tenantFiles: {}
 db:

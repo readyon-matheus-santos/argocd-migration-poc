@@ -1,0 +1,21 @@
+{{- if eq (.Values.mode | default "parent") "migrations" }}
+{{- /*
+The one NON-hook resource of the hook Application, and it is load-bearing:
+an Application whose content is only hooks has nothing to compare, so it reports
+Synced/Healthy without ever running a sync — the Jobs never fire and the parent
+sees success. Demonstrated in this lab. This ConfigMap also makes a FAILED
+migration surface as Degraded (app not Synced) rather than Healthy.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: migrations-complete
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tenant-migrations
+data:
+  releaseId: {{ .Values.releaseId | quote }}
+  {{- range .Values.services }}
+  version.{{ .name }}: {{ .version | quote }}
+  {{- end }}
+{{- end }}

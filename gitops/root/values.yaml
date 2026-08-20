@@ -4,11 +4,6 @@
 repoURL: ""
 targetRevision: ""
 
-# S1 profile switch: when false, the root template
-# omits appsets/tenant-migrations.yaml so the migrations-layer AppSet and
-# its generated apps do not exist.
-layer:
-  enabled: false
 
 # Topology switch:
 #   appsets   — harmony today: one AppSet per service, leaf apps self-sync independently

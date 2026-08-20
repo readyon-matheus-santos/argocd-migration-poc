@@ -1,24 +1,28 @@
-{{- /* Compute per-db wave: services sharing a db get 0,1,2... in list order */ -}}
+{{- if eq (.Values.mode | default "parent") "migrations" }}
 {{- $counts := dict -}}
 {{- range .Values.services -}}
 {{- $_ := set $counts .db (add (get $counts .db | default 0) 1) -}}
 {{- end -}}
 {{- $seen := dict -}}
+{{- $releaseId := .Values.releaseId -}}
 {{- range $svc := .Values.services }}
+{{- $name := $svc.name -}}
+{{- $db := $svc.db -}}
 {{- $wave := 0 -}}
-{{- if gt (int (get $counts $svc.db)) 1 -}}
-{{- $wave = int (get $seen $svc.db | default 0) -}}
-{{- $_ := set $seen $svc.db (add $wave 1) -}}
+{{- if gt (int (get $counts $db)) 1 -}}
+{{- $wave = int (get $seen $db | default 0) -}}
+{{- $_ := set $seen $db (add $wave 1) -}}
 {{- end }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: migrate-{{ $svc.name }}
+  name: migrate-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
   labels:
-    app.kubernetes.io/name: tenant-migrations
-    service: {{ $svc.name | quote }}
-    release-id: {{ $.Values.releaseId | quote }}
+    app.kubernetes.io/name: tenant-parent
+    service: {{ $name | quote }}
+    release-id: {{ $releaseId | quote }}
     job-role: migration
   annotations:
     argocd.argoproj.io/hook: PreSync
@@ -29,9 +33,9 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: tenant-migrations
-        service: {{ $svc.name | quote }}
-        release-id: {{ $.Values.releaseId | quote }}
+        app.kubernetes.io/name: tenant-parent
+        service: {{ $name | quote }}
+        release-id: {{ $releaseId | quote }}
         job-role: migration
     spec:
       restartPolicy: Never
@@ -44,7 +48,7 @@ spec:
             - name: PGPORT
               value: {{ $.Values.db.port | quote }}
             - name: PGDATABASE
-              value: {{ $svc.db | quote }}
+              value: {{ $db | quote }}
             - name: PGUSER
               valueFrom:
                 secretKeyRef:
@@ -60,11 +64,11 @@ spec:
             - name: FAIL
               value: {{ $svc.fail | default false | quote }}
             - name: SVC_NAME
-              value: {{ $svc.name | quote }}
+              value: {{ $name | quote }}
             - name: VERSION
               value: {{ $svc.version | quote }}
             - name: RELEASE_ID
-              value: {{ $.Values.releaseId | quote }}
+              value: {{ $releaseId | quote }}
           command:
             - /bin/sh
             - -c
@@ -84,4 +88,5 @@ spec:
               fi
               psql -v ON_ERROR_STOP=1 -c "UPDATE migration_log SET finished_at = now() WHERE svc='${SVC_NAME}' AND release_id='${RELEASE_ID}' AND finished_at IS NULL;"
               echo "migrate[${SVC_NAME}]: done"
+{{- end }}
 {{- end }}
