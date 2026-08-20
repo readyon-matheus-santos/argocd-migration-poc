@@ -15,3 +15,7 @@ layer:
 #   appofapps — the design: one parent per tenant whose OWN PreSync hooks are the migration
 #               Jobs; children at waves 2/4 with version pinned inline
 layout: appofapps
+
+# Cluster where tenant workloads live (registered in ArgoCD as a remote cluster).
+# "in-cluster" keeps the original single-cluster lab behaviour.
+childCluster: argocd-migration-poc-workload

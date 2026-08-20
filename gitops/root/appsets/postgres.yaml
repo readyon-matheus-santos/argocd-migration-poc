@@ -37,7 +37,7 @@ spec:
           targetRevision: __TARGET_REVISION__
           ref: values
       destination:
-        server: https://kubernetes.default.svc
+        name: __CHILD_CLUSTER__
         namespace: "{{ .namespace }}"
       syncPolicy:
         automated:

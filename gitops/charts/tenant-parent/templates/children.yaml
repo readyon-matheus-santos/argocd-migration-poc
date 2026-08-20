@@ -36,7 +36,7 @@ spec:
       targetRevision: {{ $rev }}
       ref: values
   destination:
-    server: https://kubernetes.default.svc
+    name: {{ $.Values.childCluster }}
     namespace: {{ $.Values.namespace }}
   syncPolicy:
     automated: {prune: true, selfHeal: true}

@@ -2,6 +2,10 @@ repoURL: ""
 targetRevision: ""
 tenant: ""
 namespace: ""
+# Cluster the child Applications (and therefore the tenant workloads) target.
+# In the two-cluster lab this is the workload cluster, mirroring harmony where
+# ArgoCD runs on the platform cluster and tenants live elsewhere.
+childCluster: ""
 # tenantFiles.<svc> = raw content of gitops/values/_tenants/<tenant>/<svc>.yaml (helm fileParameters)
 tenantFiles: {}
 db:

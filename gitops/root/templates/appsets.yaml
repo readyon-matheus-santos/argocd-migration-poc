@@ -13,6 +13,7 @@
 {{- $content := $.Files.Get $path }}
 {{- $content = $content | replace "__REPO_URL__" $repoURL }}
 {{- $content = $content | replace "__TARGET_REVISION__" $targetRevision }}
+{{- $content = $content | replace "__CHILD_CLUSTER__" ($.Values.childCluster | default "in-cluster") }}
 {{ $content }}
 ---
 {{- end }}

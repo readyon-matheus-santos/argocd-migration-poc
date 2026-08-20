@@ -38,6 +38,7 @@ spec:
               targetRevision: __TARGET_REVISION__
               tenant: {{ .tenant }}
               namespace: {{ .namespace }}
+              childCluster: __CHILD_CLUSTER__
         - repoURL: __REPO_URL__
           targetRevision: __TARGET_REVISION__
           ref: values
