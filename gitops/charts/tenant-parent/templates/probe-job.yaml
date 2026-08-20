@@ -23,4 +23,15 @@ spec:
         - name: probe
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           command: ["/bin/sh", "-c", "echo probe ran on $(hostname); sleep 2"]
+---
+# Non-hook resource: without one the Application has nothing to compare, reports
+# Synced/Healthy immediately and never runs a sync — so the hook above never fires.
+# (That is itself one of this lab's findings; here it just makes the probe run.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: probe-state
+  namespace: {{ .Release.Namespace }}
+data:
+  probe: {{ .Values.probeNamespace | quote }}
 {{- end }}
