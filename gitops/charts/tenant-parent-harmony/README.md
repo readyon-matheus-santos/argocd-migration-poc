@@ -16,8 +16,7 @@ tenant-<tenant>-<region>            Application, destination: platform cluster /
 ├─ PreSync ──► Application  tenant-migrations-<tenant>-<region>
 │                 destination: <tenant cluster> / <tenant namespace>
 │                 └─ same chart, mode=migrations:
-│                      Job  backend-migrations        (PreSync hook)
-│                      CM   backend-migration-state   (the non-hook resource)
+│                      Job  backend-migrations-<tag>   (a plain resource, not a hook)
 │
 └─ Sync ─────► child Applications, destination: <tenant cluster> / <tenant namespace>
                   wave 2  backend, backend-crons
@@ -43,7 +42,7 @@ migration Job template to keep in sync. The alternative — point the hook at
 `charts/backend` with a new `migrationsOnly` flag — is equally valid and avoids
 even this copy; it needs a state ConfigMap adding to that chart. Open decision.
 
-## Three things that are not optional
+## Two things that are not optional
 
 **1. The migration must be an Application, not a Job.**
 Hook resources are resources of the Application, and every resource lands on its
@@ -55,14 +54,17 @@ existed on the workload cluster. ArgoCD has no per-resource destination
 (argo-cd#8944 is still an open feature request), so only an Application — which
 carries its own destination — reaches the tenant.
 
-**2. The state ConfigMap.**
-An Application whose content is only hooks manages nothing, so ArgoCD reports it
-`Synced/Healthy` on creation and never runs a sync: the Job never fires, and the
-parent's PreSync "succeeds" with nothing migrated. Demonstrated here — children
-rolled, `migration_log` untouched, every Application green. The ConfigMap also
-makes a *failed* migration visible: app health is computed over non-hook
-resources, so with the ConfigMap unapplied the app is not Synced and the health
-customization returns Degraded, failing the parent's PreSync.
+**2. The migration Job must be a plain resource of the hook Application, not a hook inside it.**
+Hooks are excluded from the sync comparison and from app health, so an
+Application whose contents are all hooks manages nothing: ArgoCD reports it
+Synced/Healthy on creation, never runs a sync, the Job never fires, and the
+parent's PreSync "succeeds" with nothing migrated. Measured here — children
+rolled, `migration_log` untouched, every Application green. As a plain resource
+the Job *is* the app's managed state, so ArgoCD's built-in Job health does the
+gating: Progressing while migrating, Healthy on success, Degraded on failure.
+Measured: hook app Progressing → Degraded on a failed migration, zero new pods
+throughout, parent PreSync `Failed`. A Job spec is immutable, so re-runnability
+comes from a per-release Job name plus `sync-options: Replace=true`.
 
 **3. The `argocd-cm` Application health customization.**
 Without it an `Application` used as a hook has no health check, ArgoCD treats it
@@ -85,7 +87,7 @@ stall nonprod, platform and prod deployment roots on the first sync.
 | `retryLimit: 0` on the hook app, `retry.limit: 3` on the parent | one parent retry = exactly one fresh migration attempt, instead of retries multiplying |
 | Explicit `hasKey` boolean tests | `x \| default true` swallows `false`, which silently disables every `enabled: false` escape hatch |
 | Fail-loud only on the migrating service's tag | a missing tenant file for another service must not stop the whole tenant deploying |
-| `migrationsHash` in the state ConfigMap | migration-only edits (A7 TLS toggles, backoffLimit) would otherwise take effect only at the next tag bump |
+| Job as a plain resource, named per release | no marker ConfigMap needed, and migration-only edits (A7 TLS toggles, backoffLimit) change the Job manifest so they take effect immediately instead of waiting for the next tag bump |
 | The other `main` readers included | `backend-crons`, `notifications-orchestrator`, `monitoring-cronjobs` read `main_<env>` today; leaving them out breaks the stated guarantee |
 
 ## Rendering it
@@ -94,7 +96,7 @@ stall nonprod, platform and prod deployment roots on the first sync.
 helm lint  gitops/charts/tenant-parent-harmony --set mode=parent
 helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml          # the parent role
 helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml \
-  --set mode=migrations --set migrations.job.image=<tag>                                       # what lands on the tenant
+  --set mode=migrations --set migrations.job.image=<tag>                                       # the Job that lands on the tenant
 helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml \
   --set region.role=standby | grep -c tenant-migrations    # → 0, no migration in the DR region
 ```

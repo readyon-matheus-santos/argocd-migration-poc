@@ -2,7 +2,17 @@
 {{- $j := .Values.migrations.job }}
 {{- /*
 mode=migrations — what the hook Application above actually deploys, on the
-TENANT's cluster: backend's migration Job, plus the state ConfigMap next to it.
+TENANT's cluster: backend's migration Job.
+
+The Job is a PLAIN resource here, not a hook. That is deliberate and it is what
+makes the whole thing work without a marker ConfigMap: the hook Application then
+manages something real, so ArgoCD's built-in Job health drives the parent's gate
+— Progressing while migrating, Healthy on success, Degraded on failure. Make the
+Job a hook instead and the app manages nothing, reports Synced/Healthy on
+creation, never syncs, and the parent proceeds with nothing migrated.
+
+A Job spec is immutable, so re-runnability comes from the per-release name plus
+Replace=true rather than from hook-delete-policy.
 
 This mirrors charts/backend/templates/migration-job.yaml as it runs today
 (PreSync + BeforeHookCreation, backoffLimit/activeDeadlineSeconds/TTL from
@@ -13,16 +23,17 @@ a second chart is a deliberate call — see README, "One chart, two roles".
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: backend-migrations
+  name: backend-migrations-{{ .Values.migrations.job.image | replace "." "-" | replace "_" "-" | trunc 40 | trimSuffix "-" }}
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/name: backend-migrations
     app.kubernetes.io/component: migrations
     tenant: {{ .Values.client | quote }}
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # Not a hook — see the note above. The wave still serializes same-database
+    # migrations if a second writer is ever added (today backend owns `main` alone).
     argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   backoffLimit: {{ $j.backoffLimit | default 3 }}
   activeDeadlineSeconds: {{ $j.activeDeadlineSeconds | default 10800 }}
