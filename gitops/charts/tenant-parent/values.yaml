@@ -18,6 +18,8 @@ childCluster: ""
 # Consumed only in mode=migrations (passed by the hook Application).
 releaseId: r0
 services: []
+# mode=probe only (see templates/probe-job.yaml)
+probeNamespace: ""
 db:
   host: postgres
   port: 5432
