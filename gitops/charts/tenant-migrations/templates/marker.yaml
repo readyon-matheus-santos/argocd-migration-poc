@@ -1,0 +1,19 @@
+# The Release Marker. A plain Sync-phase resource: ArgoCD applies it only
+# after every PreSync hook above succeeded, so a release id appears in
+# `completed.*` iff all migrations of that release succeeded (or did so in an
+# earlier sync — previousReleaseIds). No writer Job, no write RBAC.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: migrations-complete
+  labels:
+    app.kubernetes.io/name: tenant-migrations
+data:
+  releaseId: {{ .Values.releaseId | quote }}
+  completed.{{ .Values.releaseId }}: "true"
+  {{- range .Values.previousReleaseIds }}
+  completed.{{ . }}: "true"
+  {{- end }}
+  {{- range .Values.services }}
+  version.{{ .name }}: {{ .version | quote }}
+  {{- end }}
