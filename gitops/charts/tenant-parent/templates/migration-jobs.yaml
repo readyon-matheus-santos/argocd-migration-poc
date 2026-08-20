@@ -17,7 +17,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: migrate-{{ $name }}
+  name: migrate-{{ $name }}-{{ $releaseId }}
   namespace: {{ $.Release.Namespace }}
   labels:
     app.kubernetes.io/name: tenant-parent
@@ -25,8 +25,11 @@ metadata:
     release-id: {{ $releaseId | quote }}
     job-role: migration
   annotations:
-    argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # EXPERIMENT: no hook annotations. These are plain resources of the hook
+    # Application, so the app manages something real and ArgoCD's built-in Job
+    # health drives the parent's gate. Replace=true handles Job immutability
+    # when the tag changes.
+    argocd.argoproj.io/sync-options: Replace=true
     argocd.argoproj.io/sync-wave: {{ $wave | quote }}
 spec:
   backoffLimit: 0
