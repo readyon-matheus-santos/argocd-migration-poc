@@ -34,13 +34,13 @@ children. That is the whole ordering guarantee.
 ## One chart, two roles
 
 `mode: parent` renders the hook Application and the children; `mode: migrations`
-renders the Job and the state ConfigMap. The hook Application points back at
-this same chart with `mode=migrations`.
+renders the migration Job. The hook Application points back at this same chart
+with `mode=migrations`.
 
 Two roles rather than two charts, so there is no second copy of backend's
 migration Job template to keep in sync. The alternative — point the hook at
 `charts/backend` with a new `migrationsOnly` flag — is equally valid and avoids
-even this copy; it needs a state ConfigMap adding to that chart. Open decision.
+even this copy. Open decision.
 
 ## Two things that are not optional
 
@@ -81,7 +81,7 @@ stall nonprod, platform and prod deployment roots on the first sync.
 |---|---|
 | No `resources-finalizer` on children | with `prune: true`, a child that stops rendering would otherwise cascade-delete live workload |
 | No `resources-finalizer` on the parent template | an explicit finalizer survives `preserveResourcesOnDeletion`, making un-flag a cascading delete |
-| No finalizer on the hook Application | `BeforeHookCreation` deletes it every sync; a finalizer would cascade into the running Job |
+| No finalizer on the hook Application | it is deleted and recreated on each parent sync; a finalizer would cascade into the running Job |
 | `image.tag` via `helm.parameters` | `--set` outranks inline values and `valueFiles`, so only the parent moves a child |
 | Hook gated on `role == active` **and** `databaseRole == primary` | a standby→active commit that lands before the Aurora failover would otherwise migrate a read replica |
 | `retryLimit: 0` on the hook app, `retry.limit: 3` on the parent | one parent retry = exactly one fresh migration attempt, instead of retries multiplying |
