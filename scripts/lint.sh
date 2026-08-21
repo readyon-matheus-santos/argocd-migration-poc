@@ -11,6 +11,7 @@ helm lint gitops/charts/tenant-parent --set mode=migrations --set releaseId=r0 -
 helm lint gitops/charts/tenant-parent-harmony --set mode=parent
 helm lint gitops/charts/tenant-parent-harmony --set mode=migrations --set migrations.job.image=v1 --set migrations.job.repository=ecr/x
 helm template t gitops/charts/tenant-parent-harmony -f gitops/charts/tenant-parent-harmony/ci/armk-prod-use2-values.yaml >/dev/null
+if grep -rqE "\b(9511139|9757074|1161535)[0-9]{5}\b" gitops/ ; then echo "AWS account id in a public repo" >&2; exit 1; fi
 
 for f in bootstrap/*.sh scripts/*.sh scripts/lib/*.sh; do bash -n "$f"; done
 if command -v shellcheck >/dev/null; then shellcheck -x bootstrap/*.sh scripts/*.sh scripts/lib/*.sh || true; fi

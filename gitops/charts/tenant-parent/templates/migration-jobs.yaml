@@ -25,10 +25,11 @@ metadata:
     release-id: {{ $releaseId | quote }}
     job-role: migration
   annotations:
-    # EXPERIMENT: no hook annotations. These are plain resources of the hook
-    # Application, so the app manages something real and ArgoCD's built-in Job
-    # health drives the parent's gate. Replace=true handles Job immutability
-    # when the tag changes.
+    # Deliberately NOT a hook. As plain resources these Jobs are what the hook
+    # Application manages, so ArgoCD's built-in Job health drives the parent's
+    # gate: Progressing while migrating, Healthy on success, Degraded on failure.
+    # Make them hooks and the app manages nothing, reports Synced/Healthy on
+    # creation and never runs them. Replace=true covers Job immutability.
     argocd.argoproj.io/sync-options: Replace=true
     argocd.argoproj.io/sync-wave: {{ $wave | quote }}
 spec:

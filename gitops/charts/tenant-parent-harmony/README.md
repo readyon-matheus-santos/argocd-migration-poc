@@ -3,7 +3,7 @@
 What ships to `readyon-harmony` / `readyon-harmony-charts` for the app-of-apps
 solution, written against harmony's real shapes rather than the lab's fake
 services. Published as `readyon-helm-charts/tenant-parent`; consumed by
-`applicationsets/<env>/tenant-parent.yaml` (see `applicationset-example.yaml`).
+`applicationsets/<env>/tenant-parent.yaml` (see `applicationset-prod.yaml`).
 
 Not wired into this lab's `gitops/root` — the lab exercises the *mechanism* with
 fake services; this folder is the deliverable.
@@ -89,6 +89,21 @@ stall nonprod, platform and prod deployment roots on the first sync.
 | Fail-loud only on the migrating service's tag | a missing tenant file for another service must not stop the whole tenant deploying |
 | Job as a plain resource, named per release | no marker ConfigMap needed, and migration-only edits (A7 TLS toggles, backoffLimit) change the Job manifest so they take effect immediately instead of waiting for the next tag bump |
 | The other `main` readers included | `backend-crons`, `notifications-orchestrator`, `monitoring-cronjobs` read `main_<env>` today; leaving them out breaks the stated guarantee |
+
+## What is in this folder
+
+| File | What |
+|---|---|
+| `applicationset-prod.yaml` | the real `applicationsets/prod/tenant-parent.yaml`. Every child's `valueFiles` and inline `values` are copied **verbatim** from that service's current ApplicationSet at `origin/main` |
+| `ci/armk-prod-use2-values.yaml` | the same content with the generator's vars resolved for armk-prod/use2, so the chart can be rendered and diffed |
+| `ci/rendered-armk-prod-use2.yaml` | the rendered output: 11 child Applications + the migration hook, ready to diff against the live apps |
+| `templates/`, `values.yaml` | the chart itself |
+
+**Redaction.** This repo is public, so AWS account IDs are replaced with
+`<PLATFORM_ACCOUNT_ID>` / `<PROD_ACCOUNT_ID>` / `<NONPROD_ACCOUNT_ID>` (30
+occurrences). Nothing else was altered — no credentials appear in harmony's
+ApplicationSets in the first place (secrets come from ExternalSecrets at runtime).
+Restore them with a `sed` before using any of this in harmony.
 
 ## Rendering it
 

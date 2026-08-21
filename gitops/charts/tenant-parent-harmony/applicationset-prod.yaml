@@ -1,0 +1,673 @@
+# THE REAL THING: applicationsets/prod/tenant-parent.yaml as it would land in
+# readyon-harmony. Every child's valueFiles and inline values below are copied
+# VERBATIM from that service's current ApplicationSet at origin/main — the only
+# edits are (a) AWS account IDs replaced with <..._ACCOUNT_ID> placeholders
+# because this repo is public, and (b) backend gains disableMigrations.
+#
+# Restore the real values with:
+#   sed -i "s/<PLATFORM_ACCOUNT_ID>/<id>/g; s/<PROD_ACCOUNT_ID>/<id>/g" applicationset-prod.yaml
+# (nonprod mirror: project non-production, floating chart range, and the
+# nonprod-configs/ + rad-environments.yaml generators).
+#
+# This is the ONLY new ApplicationSet. It replaces the per-service AppSets of the
+# shared-DB group; every other AppSet in harmony stays exactly as it is.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tenant-parent-prod
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
+              revision: main
+              files:
+                - path: configs/tenants.yaml
+              # Opt-in per tenant. "pending" un-generates the per-service apps
+              # without creating the parent yet, so "old apps gone" is observable
+              # before the hand-over (board D3).
+              selector:
+                matchExpressions:
+                  - key: tenantParentEnabled
+                    operator: In
+                    values: ["true"]
+          - git:
+              repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
+              revision: main
+              files:
+                - path: configs/regions.yaml
+
+  # Deleting a parent must never take its children's workloads with it. The
+  # controller only injects resources-finalizer when the template carries none,
+  # so this stays effective ONLY while the template below has no finalizers.
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+
+  template:
+    metadata:
+      name: 'tenant-{{.tenant}}-{{.shortName}}'
+      labels:
+        app: tenant-parent
+        tenant: '{{.client}}'
+        env: '{{.env}}'
+        region: '{{.shortName}}'
+    spec:
+      # Dedicated project: the parent writes Application objects into the
+      # platform cluster's argocd namespace, which `non-production` must not be
+      # allowed to reach (board D5). Its children keep production/non-production.
+      project: tenant-parents-prod
+
+      sources:
+        - repoURL: <PLATFORM_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com
+          chart: readyon-helm-charts/tenant-parent
+          targetRevision: "REPLACE-WITH-EXACT-CHART-VERSION"   # B7: prod never floats
+          helm:
+            # The parent reads the SAME per-service tenant files the release bot
+            # already writes. No new file, no tenant-file restructure, release
+            # pipeline unchanged. Keys are camelCase to match the chart.
+            fileParameters:
+              - name: tenantFiles.backend
+                path: $values/values/_tenants/{{.tenant}}/backend-tenant.yaml
+              - name: tenantFiles.backendCrons
+                path: $values/values/_tenants/{{.tenant}}/backend-crons-tenant.yaml
+              - name: tenantFiles.buildShift
+                path: $values/values/_tenants/{{.tenant}}/build-shift-tenant.yaml
+              - name: tenantFiles.orgHierarchy
+                path: $values/values/_tenants/{{.tenant}}/org-hierarchy-tenant.yaml
+              - name: tenantFiles.rbac
+                path: $values/values/_tenants/{{.tenant}}/rbac-tenant.yaml
+              - name: tenantFiles.shiftManagement
+                path: $values/values/_tenants/{{.tenant}}/shift-management-tenant.yaml
+              - name: tenantFiles.userManagement
+                path: $values/values/_tenants/{{.tenant}}/user-management-tenant.yaml
+              - name: tenantFiles.workRule
+                path: $values/values/_tenants/{{.tenant}}/work-rule-tenant.yaml
+              - name: tenantFiles.notificationsOrchestrator
+                path: $values/values/_tenants/{{.tenant}}/notifications-orchestrator-tenant.yaml
+              - name: tenantFiles.monitoringCronjobs
+                path: $values/values/_tenants/{{.tenant}}/monitoring-cronjobs-tenant.yaml
+              - name: tenantFiles.apolloRouter
+                path: $values/values/_tenants/{{.tenant}}/apollo-router-tenant.yaml
+            values: |
+              tenant: {{.tenant}}
+              client: {{.client}}
+              env: {{.env}}
+              environmentName: {{.environmentName}}
+              namespace: {{.namespace}}
+              isolationMode: {{.isolationMode | default "isolated"}}
+              childProject: production
+              region:
+                shortName: {{.shortName}}
+                name: {{.regionName}}
+                cluster: {{.cluster}}
+                accountId: "{{.accountId}}"
+                role: {{.role | default "active"}}
+                databaseRole: {{.databaseRole | default "primary"}}
+                replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+              # children.<svc>.valueFiles / .values are copied VERBATIM from each
+              # service's current ApplicationSet — see the chart README.
+              children:
+                backend:
+                  appName: backend
+                  chart: readyon-helm-charts/backend
+                  targetRevision: "1.10.8"
+                  wave: "2"
+                  disableMigrations: true   # its migration moved to the parent's hook
+                  valueFiles:
+                    - $values/values/_base/backend.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/backend-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/backend-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    # Per-app credentials templating
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    env:
+                      # Read-only source DB name for the associateGroupId backfill
+                      # migration (readyon-ui #25185), run by THIS backend PreSync Job.
+                      # The migration opens a second, read-only connection to the
+                      # tenant's associates-group DB; host, port, credentials and TLS
+                      # are inherited from the Job's own TYPEORM_* (the AG DB and the
+                      # main DB sit on the same cluster in every tenant), so the
+                      # database NAME is the only thing it needs. It lands in the Job
+                      # because the backend chart merges `env` into the migration Job.
+                      #
+                      # Derived, not hardcoded per tenant: this MUST resolve to THIS
+                      # tenant's AG DB. The expression mirrors the associates-group
+                      # subgraph's own DB name (the chart's common.dbFullName, baseName
+                      # associates_group):
+                      #   shared             -> {client}_associates_group_{env}
+                      #   isolated/dedicated -> associates_group_{env}
+                      # Prod is NOT uniform: armk/hilt/mgm are isolated/dedicated and
+                      # get NO client prefix (associates_group_prod, _uat, _sbx), while
+                      # rdyn-prod is `shared` and does (rdyn_associates_group_prod).
+                      # common.dbFullName special-cases only "shared" — `dedicated`
+                      # takes the same unprefixed branch as `isolated`, so test on
+                      # "shared", never on the mode list.
+                      #
+                      # Anchored on `.env` alone (no dbEnv term): RAD is a nonprod-only
+                      # construct, no prod tenant carries `dbEnv`, and nothing under
+                      # values/ sets the chart's dbEnvironment — so the env axis IS the
+                      # database axis here.
+                      AG_DATABASE: '{{ if eq (.isolationMode | default "isolated") "shared" }}{{ .client }}_{{ end }}associates_group_{{ .env }}'
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                      AWS_S3_DOCUMENTS_BUCKET: "{{.tenant}}-documents-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      AWS_S3_SNOWFLAKE_BUCKET: "{{.tenant}}-snowflake-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                    serviceAccount:
+                      create: true
+                      name: backend
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{.shortName}}-{{.tenant}}-backend-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+
+
+                backendCrons:
+                  appName: backend-crons
+                  chart: readyon-helm-charts/backend
+                  targetRevision: "1.10.8"
+                  wave: "2"
+                  valueFiles:
+                    - $values/values/_base/backend-crons.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/backend-crons-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/backend-crons-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    # Per-app credentials templating (uses same secret as backend)
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    env:
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                      AWS_S3_DOCUMENTS_BUCKET: "{{.tenant}}-documents-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      AWS_S3_SNOWFLAKE_BUCKET: "{{.tenant}}-snowflake-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                    serviceAccount:
+                      create: true
+                      name: backend-crons
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{.shortName}}-{{.tenant}}-backend-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+
+
+                buildShift:
+                  appName: build-shift
+                  chart: readyon-helm-charts/graphql
+                  targetRevision: "0.10.3"
+                  wave: "4"
+                  valueFiles:
+                    - $values/values/_base/build-shift.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/build-shift-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/build-shift-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    env:
+                      ENV: "{{.environmentName}}"
+                      NODE_ENV: "{{.environmentName}}"
+                      TENANT_ID: "{{.client}}"
+                      # Reproduce umbrella-injected env (live-verified); shared-prod carries neither.
+                      AWS_S3_DOCUMENTS_BUCKET: "{{.tenant}}-documents-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      AWS_S3_SNOWFLAKE_BUCKET: "{{.tenant}}-snowflake-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                    # build-shift runs PM2 (live pod = readOnlyRootFilesystem false). Set here (Layer 5,
+                    # after shared-prod) so the B8 baseline true doesn't clobber it.
+                    securityContext:
+                      readOnlyRootFilesystem: false
+                    # Per-subgraph IRSA. Own graphql-build-shift SA + dedicated role, region-
+                    # correct via .shortName (use2 active / usw2 standby).
+                    serviceAccount:
+                      create: true
+                      name: graphql-build-shift
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{ .shortName }}-{{ .tenant }}-graphql-build-shift-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+                    {{- if eq .role "standby" }}
+                    # usw2 (standby) has no live graphql pods; keep the standalone disabled there.
+                    enabled: false
+                    {{- end }}
+
+
+                orgHierarchy:
+                  appName: org-hierarchy
+                  chart: readyon-helm-charts/graphql
+                  targetRevision: "0.10.3"
+                  wave: "4"
+                  valueFiles:
+                    - $values/values/_base/org-hierarchy.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/org-hierarchy-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/org-hierarchy-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    env:
+                      ENV: "{{.environmentName}}"
+                      NODE_ENV: "{{.environmentName}}"
+                      TENANT_ID: "{{.client}}"
+                      # Reproduce umbrella-injected env (live-verified); shared-prod carries neither.
+                      AWS_S3_DOCUMENTS_BUCKET: "{{.tenant}}-documents-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      AWS_S3_SNOWFLAKE_BUCKET: "{{.tenant}}-snowflake-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                    # org-hierarchy runs PM2 (live pod = readOnlyRootFilesystem false). Set here
+                    # (Layer 5, after shared-prod) so the B8 baseline true doesn't clobber it.
+                    securityContext:
+                      readOnlyRootFilesystem: false
+                    # Per-subgraph IRSA. Own graphql-org-hierarchy SA + dedicated role, region-
+                    # correct via .shortName (use2 active / usw2 standby).
+                    serviceAccount:
+                      create: true
+                      name: graphql-org-hierarchy
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{ .shortName }}-{{ .tenant }}-graphql-org-hierarchy-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+                    {{- if eq .role "standby" }}
+                    # usw2 (standby) has no live graphql pods; keep the standalone disabled there.
+                    enabled: false
+                    {{- end }}
+
+
+                rbac:
+                  appName: rbac
+                  chart: readyon-helm-charts/graphql
+                  targetRevision: "0.10.3"
+                  wave: "4"
+                  valueFiles:
+                    - $values/values/_base/rbac.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/rbac-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/rbac-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    env:
+                      ENV: "{{.environmentName}}"
+                      NODE_ENV: "{{.environmentName}}"
+                      # Standalone subgraph: derive TENANT_ID from the matrix client value.
+                      TENANT_ID: "{{.client}}"
+                      # Reproduce env the umbrella injects on rbac (live-verified via argocd);
+                      # shared-prod carries neither the S3 buckets nor the DB pool size.
+                      AWS_S3_DOCUMENTS_BUCKET: "{{.tenant}}-documents-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      AWS_S3_SNOWFLAKE_BUCKET: "{{.tenant}}-snowflake-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      # Per-tenant OTEL collector (else inherits platform SignOz from shared-prod).
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                    # RBAC needs a writable root (PM2; live rbac = false). Set here (Layer 5, after
+                    # shared-prod) so the B8 baseline readOnlyRootFilesystem: true doesn't clobber it.
+                    securityContext:
+                      readOnlyRootFilesystem: false
+                    # Reuse the shared graphql-services service account (now created by the apollo-router app).
+                    # Per-subgraph IRSA. Own graphql-rbac SA + dedicated role, region-
+                    # correct via .shortName (use2 active / usw2 standby).
+                    serviceAccount:
+                      create: true
+                      name: graphql-rbac
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{ .shortName }}-{{ .tenant }}-graphql-rbac-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+                    {{- if eq .role "standby" }}
+                    # usw2 (standby) has no live graphql pods; keep the standalone disabled
+                    # there (region/tenant layers can't override this reliably).
+                    enabled: false
+                    {{- end }}
+
+
+                shiftManagement:
+                  appName: shift-management
+                  chart: readyon-helm-charts/graphql
+                  targetRevision: "0.10.3"
+                  wave: "4"
+                  valueFiles:
+                    - $values/values/_base/shift-management.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/shift-management-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/shift-management-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    env:
+                      ENV: "{{.environmentName}}"
+                      NODE_ENV: "{{.environmentName}}"
+                      TENANT_ID: "{{.client}}"
+                      # Reproduce umbrella-injected env (live-verified); shared-prod carries neither.
+                      AWS_S3_DOCUMENTS_BUCKET: "{{.tenant}}-documents-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      AWS_S3_SNOWFLAKE_BUCKET: "{{.tenant}}-snowflake-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      # DB pool: _base defaults 60; armk/mgm/rdyn-prod override to 30 in their tenant files (matches live).
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                    # shift-management writes its schema to /app/writable/schema.gql (live pod =
+                    # readOnlyRootFilesystem false). Set here (Layer 5, after shared-prod) so the B8
+                    # baseline true doesn't clobber it.
+                    securityContext:
+                      readOnlyRootFilesystem: false
+                    # Per-subgraph IRSA. Own graphql-shift-management SA + dedicated role, region-
+                    # correct via .shortName (use2 active / usw2 standby).
+                    serviceAccount:
+                      create: true
+                      name: graphql-shift-management
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{ .shortName }}-{{ .tenant }}-graphql-shift-management-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+                    {{- if eq .role "standby" }}
+                    # usw2 (standby) has no live graphql pods; keep the standalone disabled there.
+                    enabled: false
+                    {{- end }}
+
+
+                userManagement:
+                  appName: user-management
+                  chart: readyon-helm-charts/graphql
+                  targetRevision: "0.10.3"
+                  wave: "4"
+                  valueFiles:
+                    - $values/values/_base/user-management.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/user-management-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/user-management-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    env:
+                      ENV: "{{.environmentName}}"
+                      NODE_ENV: "{{.environmentName}}"
+                      TENANT_ID: "{{.client}}"
+                      # Reproduce umbrella-injected env (live-verified); shared-prod carries neither.
+                      AWS_S3_DOCUMENTS_BUCKET: "{{.tenant}}-documents-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      AWS_S3_SNOWFLAKE_BUCKET: "{{.tenant}}-snowflake-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      # Standalone subgraphs standardize on 30 (rbac/recruit/org-hierarchy pattern).
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                    # user-management needs a writable root FS (live pod = readOnlyRootFilesystem
+                    # false). Set here (Layer 5, after shared-prod) so the B8 baseline true doesn't
+                    # clobber it; the rest of the baseline deep-merges from shared-prod.
+                    securityContext:
+                      readOnlyRootFilesystem: false
+                    # Per-subgraph IRSA. Own graphql-user-management SA + dedicated role, region-
+                    # correct via .shortName (use2 active / usw2 standby).
+                    serviceAccount:
+                      create: true
+                      name: graphql-user-management
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{ .shortName }}-{{ .tenant }}-graphql-user-management-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+                    {{- if eq .role "standby" }}
+                    # usw2 (standby) has no live graphql pods; keep the standalone disabled there.
+                    enabled: false
+                    {{- end }}
+
+
+                workRule:
+                  appName: work-rule
+                  chart: readyon-helm-charts/graphql
+                  targetRevision: "0.10.3"
+                  wave: "4"
+                  valueFiles:
+                    - $values/values/_base/work-rule.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/work-rule-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/work-rule-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    env:
+                      ENV: "{{.environmentName}}"
+                      NODE_ENV: "{{.environmentName}}"
+                      # Standalone subgraph: derive TENANT_ID from the matrix client value.
+                      TENANT_ID: "{{.client}}"
+                      # Reproduce env the umbrella injects on work-rule (live-verified via argocd);
+                      # shared-prod carries neither the S3 buckets nor the DB pool size.
+                      AWS_S3_DOCUMENTS_BUCKET: "{{.tenant}}-documents-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      AWS_S3_SNOWFLAKE_BUCKET: "{{.tenant}}-snowflake-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      # Automatch publisher: env-scoped Hub FQDN + per-tenant automatch queue/bucket
+                      # (copied from the umbrella work-rule inline block; queue uses client-env).
+                      HUB_API_BASE_URL: "http://readyon-hub.auth-{{.env}}.svc.cluster.local:3001"
+                      AWS_SQS_AUTOMATCH_QUEUE_NAME: "automatch-requests-{{.client}}-{{.env}}"
+                      AWS_S3_AUTOMATCH_BUCKET: "{{.tenant}}-automatch-{{.regionName}}-<PROD_ACCOUNT_ID>"
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      # Per-tenant OTEL collector (else inherits platform SignOz from shared-prod).
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                    # work-rule needs a writable root (PM2; live work-rule = false). Set here (Layer 5,
+                    # after shared-prod) so the B8 baseline readOnlyRootFilesystem: true doesn't clobber it.
+                    securityContext:
+                      readOnlyRootFilesystem: false
+                    # Reuse the shared graphql-services service account (now created by the apollo-router app).
+                    # Per-subgraph IRSA. Own graphql-work-rule SA + dedicated role, region-
+                    # correct via .shortName (use2 active / usw2 standby).
+                    serviceAccount:
+                      create: true
+                      name: graphql-work-rule
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{ .shortName }}-{{ .tenant }}-graphql-work-rule-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+                    {{- if eq .role "standby" }}
+                    # usw2 (standby) has no live graphql pods; keep the standalone disabled
+                    # there (region/tenant layers can't override this reliably).
+                    enabled: false
+                    {{- end }}
+
+
+                notificationsOrchestrator:
+                  appName: notifications-orchestrator
+                  chart: readyon-helm-charts/notifications-orchestrator
+                  targetRevision: "1.3.9"
+                  wave: "3"
+                  valueFiles:
+                    - $values/values/_base/notifications-orchestrator.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/notifications-orchestrator-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/notifications-orchestrator-tenant.yaml
+                  values: |
+                    aws:
+                      accountId: "{{.accountId}}"
+                      region: "{{.regionName}}"
+                    serviceAccount:
+                      create: true
+                      name: notifications-orchestrator
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{.shortName}}-{{.tenant}}-notifications-orchestrator-role"
+                    # Templating values consumed by chart helpers (db-external-secret resolves
+                    # `common.dbUsername` + `common.dbFullName` from these).
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: "{{.isolationMode | default "isolated"}}"
+                    env:
+                      {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                      {{- end }}
+                      ENV: "{{.environmentName}}"
+                      NODE_ENV: "{{.environmentName}}"
+                      READYON_FCM_APP_ID: {{- if eq .env "prod" }} "readyon"{{- else }} "readyon-{{.env}}"{{- end }}
+
+
+                monitoringCronjobs:
+                  appName: monitoring-cronjobs
+                  chart: readyon-helm-charts/monitoring-cronjobs
+                  targetRevision: "1.1.6"
+                  wave: "4"
+                  valueFiles:
+                    - $values/values/_base/monitoring-cronjobs.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/monitoring-cronjobs-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/monitoring-cronjobs-tenant.yaml
+                  values: |
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    namespace: "{{.namespace}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                    env:
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                    {{- end }}
+
+
+                apolloRouter:
+                  appName: apollo-router
+                  chart: readyon-helm-charts/apollo-router
+                  targetRevision: "1.11.2"
+                  wave: "5"
+                  valueFiles:
+                    - $values/values/_base/apollo-router.yaml
+                    - $values/values/shared-prod.yaml
+                    - $values/values/_regions/{{.shortName}}/apollo-router-region.yaml
+                    - $values/values/_tenants/{{.tenant}}/apollo-router-tenant.yaml
+                  values: |
+                    environment: "{{.env}}"
+                    client: "{{.client}}"
+                    isolationMode: {{.isolationMode | default "isolated"}}
+                    # Own the shared graphql-services ServiceAccount + IRSA role (WS-C).
+                    # Re-homed from the umbrella (which created it at wave 3) so it survives
+                    # the umbrella/gateway teardown without stripping the fleet's AWS identity.
+                    # Every graphql-fleet workload in the namespace (standalone subgraphs +
+                    # the umbrella's gateway) reuses it by name. Mirrors nonprod (#3824-era).
+                    # NB: chart creates the SA only when serviceAccountName is unset — so this
+                    # replaces the prior `serviceAccountName: graphql-services` reference.
+                    serviceAccount:
+                      create: true
+                      name: graphql-services
+                      annotations:
+                        eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-{{.shortName}}-{{.tenant}}-graphql-role"
+                    region:
+                      role: {{.role | default "active" | quote}}
+                      replicaMultiplier: {{.replicaMultiplier | default 1.0}}
+                    {{- if eq (.otelCollectorEnabled | default "false") "true" }}
+                    # Route telemetry to the per-tenant OTEL collector (deployed by
+                    # otel-tenant-collector AppSet) which forwards to the client's
+                    # SignOz instance. Without this, apollo-router inherits
+                    # OTEL_ENDPOINT from shared-prod.yaml and lands in the
+                    # platform-cluster SignOz instead of signoz-{client}. Same
+                    # override pattern as callouts-prod and graphql-services-prod.
+                    env:
+                      OTEL_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318"
+                      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/logs"
+                      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/metrics"
+                      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
+                    {{- end }}
+              migrations:
+                from: backend
+                retryLimit: 0
+                job:
+                  repository: {{.accountId}}.dkr.ecr.{{.regionName}}.amazonaws.com/readyon-backend
+                  externalSecretName: backend-migrations-db-secrets
+                  env:
+                    TYPEORM_SSL_MODE: "true"
+                    NODE_TLS_REJECT_UNAUTHORIZED: "0"
+
+        - repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
+          targetRevision: main
+          ref: values
+
+      # The parent holds Application objects, so it targets the cluster ArgoCD
+      # runs on — not the tenant's cluster. Its children and its migration hook
+      # carry the tenant cluster as their own destination.
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+
+      # NO metadata.finalizers here: an explicit finalizer survives
+      # preserveResourcesOnDeletion, and un-flagging a tenant would then cascade
+      # parent → children → live Deployments (board D2).
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        # A failed migration is rarely transient, but a RAD clone or a
+        # just-promoted DR writer can be. One parent retry = one fresh migration
+        # attempt, because the hook Application itself is retryLimit 0.
+        retry:
+          limit: 3
+          backoff:
+            duration: 60s
+            maxDuration: 15m
