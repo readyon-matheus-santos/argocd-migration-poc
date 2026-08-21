@@ -9,7 +9,7 @@ GIT_BRANCH     ?= main
 -include .env
 export REPO_URL GITHUB_LOGIN GIT_BRANCH
 
-.PHONY: bootstrap repo-secret teardown clean status preflight seed lint scenario-% assert-%
+.PHONY: workload-cluster bootstrap repo-secret teardown clean status preflight seed lint scenario-% assert-%
 
 preflight:
 	@bash bootstrap/preflight.sh
@@ -21,6 +21,9 @@ bootstrap: preflight
 	@bash bootstrap/apply-root-app.sh
 	@bash bootstrap/wait-for-root.sh
 	@bash scripts/seed.sh
+
+workload-cluster:
+	@bash bootstrap/workload-cluster-up.sh
 
 seed:
 	@bash scripts/seed.sh
