@@ -27,15 +27,6 @@ migrations:
     repository: postgres
     tag: "16"
 
-# Runtime Gate: init container that keeps the pod un-Ready until the
-# migrations-complete ConfigMap carries this pod's releaseId.
-gate:
-  enabled: true
-  pollIntervalSeconds: 2
-  timeoutSeconds: 600
-  image:
-    repository: curlimages/curl
-    tag: "8.10.1"
 
 progressDeadlineSeconds: 600
 

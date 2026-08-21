@@ -50,19 +50,7 @@ wait_apps_exist() { # wait_apps_exist <timeout> <app>...
   return 1
 }
 
-marker() { # marker <tenant>  -> releaseId or ""
-  k get configmap migrations-complete -n "$1" -o jsonpath='{.data.releaseId}' 2>/dev/null || true
-}
 
-wait_marker() { # wait_marker <timeout> <tenant> <releaseId>
-  local timeout="$1" tenant="$2" want="$3" elapsed=0
-  while (( elapsed < timeout )); do
-    [[ "$(marker "$tenant")" == "$want" ]] && return 0
-    sleep 3; elapsed=$((elapsed + 3))
-  done
-  echo "timeout: marker in $tenant is '$(marker "$tenant")', want '$want'" >&2
-  return 1
-}
 
 psql_tenant() { # psql_tenant <tenant> <db> <sql>
   k exec -n "$1" deploy/postgres -- psql -U poc -d "$2" -At -c "$3"
@@ -115,7 +103,7 @@ dump_forensics() { # dump_forensics <dir>
   k get applications.argoproj.io -n argocd -o yaml > "$d/applications.yaml" 2>/dev/null
   local t
   for t in acme globex; do
-    { k get pods,jobs -n "$t" -o wide; k get configmap migrations-complete -n "$t" -o yaml; } > "$d/$t-objects.txt" 2>&1 || true
+    k get pods,jobs -n "$t" -o wide > "$d/$t-objects.txt" 2>&1 || true
     k describe jobs -n "$t" > "$d/$t-jobs-describe.txt" 2>&1 || true
     k describe pods -n "$t" > "$d/$t-pods-describe.txt" 2>&1 || true
     psql_tenant "$t" main "SELECT svc,release_id,version,started_at,finished_at,extract(epoch from started_at) AS s,extract(epoch from finished_at) AS f FROM migration_log ORDER BY started_at" > "$d/$t-ledger-main.txt" 2>&1 || true

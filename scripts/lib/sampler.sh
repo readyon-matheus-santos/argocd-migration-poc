@@ -5,7 +5,6 @@
 #   pod   tenant svc      version release-id ready(True/False) init-state
 #   job   tenant jobname  release-id active succeeded failed
 #   app   tenant appname  sync health phase
-#   marker tenant -       releaseId
 sample_once() {
   local out="$1" epoch tenant
   epoch="$(date +%s)"
@@ -14,7 +13,6 @@ sample_once() {
       | awk -v e="$epoch" -v t="$tenant" -F'\t' 'NF>=4 && $1!="postgres" && $1!="tenant-migrations" {st="-"; if (match($5,/"(waiting|running|terminated)"/)) st=substr($5,RSTART+1,RLENGTH-2); if (st=="waiting" && match($5,/"reason":"[A-Za-z]+"/)) st=st ":" substr($5,RSTART+10,RLENGTH-11); printf "%s\tpod\t%s\t%s\t%s\t%s\t%s\t%s\n", e, t, $1, $2, $3, $4, st}' >> "$out"
     kubectl get jobs -n "$tenant" -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.release-id}{"\t"}{.status.active}{"\t"}{.status.succeeded}{"\t"}{.status.failed}{"\n"}{end}' 2>/dev/null \
       | awk -v e="$epoch" -v t="$tenant" -F'\t' 'NF>=1 && $1!="" {printf "%s\tjob\t%s\t%s\t%s\t%s\t%s\t%s\n", e, t, $1, $2, ($3==""?0:$3), ($4==""?0:$4), ($5==""?0:$5)}' >> "$out"
-    printf '%s\tmarker\t%s\t-\t%s\t%s\n' "$epoch" "$tenant" "$(kubectl get configmap migrations-complete -n "$tenant" -o jsonpath='{.data.releaseId}' 2>/dev/null || true)" "$(kubectl get configmap migrations-complete -n "$tenant" -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null | sed -n 's/^completed\.//p' | sort | tr '\n' ',' )" >> "$out"
   done
   kubectl get applications.argoproj.io -n argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.sync.status}{"\t"}{.status.health.status}{"\t"}{.status.operationState.phase}{"\n"}{end}' 2>/dev/null \
     | awk -v e="$epoch" -F'\t' '$1!="root" {n=$1; t=n; sub(/.*-/,"",t); printf "%s\tapp\t%s\t%s\t%s\t%s\t%s\n", e, t, n, $2, $3, ($4==""?"-":$4)}' >> "$out"

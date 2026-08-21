@@ -3,22 +3,19 @@
 # Sourced by seed and the scenario driver. Pure file writers; no git here.
 
 # write_profile <s1|s2|s3>
-#   s1: per-app migrations on, layer off, gate off  (prod baseline shape)
-#   s2: layer on, per-app migrations off, gate off  (waves-only)
-#   s3: layer on, per-app migrations off, gate on   (layer + gate comparison)
-#   aoa: app-of-apps with the migrations as the parent's own PreSync (the design)
+#   appsets: harmony today (per-service AppSets, per-app migrations)
+#   aoa:     the design (parent + PreSync hook Application)
 write_profile() {
-  local profile="$1" layer migrations gate
+  local profile="$1" migrations
   local layout=appsets
   case "$profile" in
-    s1) layer=false; migrations=true;  gate=false ;;
-    s2) layer=true;  migrations=false; gate=false ;;
-    s3) layer=true;  migrations=false; gate=true ;;
-    aoa) layer=false; migrations=false; gate=false; layout=appofapps ;;
+    # baseline: harmony today — per-service AppSets, each running its own migration
+    appsets) migrations=true;  layout=appsets ;;
+    # the design: one parent per tenant, migrations as its PreSync hook Application
+    aoa)     migrations=false; layout=appofapps ;;
     *) echo "unknown profile '$profile'" >&2; return 1 ;;
   esac
   local root_values="$LAB_ROOT/gitops/root/values.yaml"
-  sed -i '' -E "s/^(  enabled: )(true|false)$/\1${layer}/" "$root_values"
   sed -i '' -E "s/^layout: .*$/layout: ${layout}/" "$root_values"
   local svc db
   for svc in backend subgraph-a subgraph-b; do
@@ -29,8 +26,6 @@ db:
   name: $db
 migrations:
   enabled: $migrations
-gate:
-  enabled: $gate
 YAML
   done
 }
@@ -38,22 +33,19 @@ YAML
 # write_tenant_values <tenant> <releaseId> <version>
 # Writes ONLY the per-service tenant files. There is deliberately no
 # tenant-migrations file: the migration Application is rendered by the parent
-# chart, which reads the image/version out of these same per-service files. [svc=sleepSeconds ...] [fail:svc ...] [gateTimeout:N] [progressDeadline:N] [version:svc=vX ...]
+# chart, which reads the image/version out of these same per-service files. [svc=sleepSeconds ...] [fail:svc ...] [version:svc=vX ...]
 #   Regenerates the four gitops/values/_tenants/<tenant>/*.yaml files.
 write_tenant_values() {
   local tenant="$1" release="$2" version="$3"; shift 3
   local -A sleep=( [backend]=2 [subgraph-a]=2 [subgraph-b]=2 )
   local -A fail=( [backend]=false [subgraph-a]=false [subgraph-b]=false )
   local -A ver=( [backend]="$version" [subgraph-a]="$version" [subgraph-b]="$version" )
-  local gate_timeout="" progress_deadline=""
   local -A replicas=()
   local keep=""
   local arg
   for arg in "$@"; do
     case "$arg" in
       fail:*) fail[${arg#fail:}]=true ;;
-      gateTimeout:*) gate_timeout="${arg#gateTimeout:}" ;;
-      progressDeadline:*) progress_deadline="${arg#progressDeadline:}" ;;
       version:*) local kv="${arg#version:}"; ver[${kv%%=*}]="${kv#*=}" ;;
       replicas:*) local kv="${arg#replicas:}"; replicas[${kv%%=*}]="${kv#*=}" ;;
       keep:*) keep="${arg#keep:}" ;;
@@ -73,13 +65,6 @@ write_tenant_values() {
       echo "  fail: ${fail[$svc]}"
       if [[ -n "${replicas[$svc]:-}" ]]; then
         echo "replicaCount: ${replicas[$svc]}"
-      fi
-      if [[ -n "$gate_timeout" ]]; then
-        echo "gate:"
-        echo "  timeoutSeconds: $gate_timeout"
-      fi
-      if [[ -n "$progress_deadline" ]]; then
-        echo "progressDeadlineSeconds: $progress_deadline"
       fi
     } > "$dir/$svc.yaml"
   done

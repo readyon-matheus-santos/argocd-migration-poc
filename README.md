@@ -78,7 +78,7 @@ kubeconfig is never read or written.
 | `make seed` | default profile at `r0`; smoke test of the whole stack |
 | `make scenario-N` / `make assert-N` | run one scenario (self-contained from any prior state) / judge its evidence in `runs/sN/` |
 | `make prepare-N` | converge a scenario's baseline without firing the release (for watching it live) |
-| `make status` | remote revision, every Application, per-tenant pods and marker |
+| `make status` | remote revision, every Application, per-tenant pods |
 | `make lint` | helm lint, `bash -n`, shellcheck if present, token/URL guards |
 | `make teardown` / `make clean` | delete the kind cluster / also `.cache/` and `runs/` |
 
@@ -88,53 +88,41 @@ ArgoCD UI: `kubectl --kubeconfig .cache/kubeconfig -n argocd port-forward svc/ar
 Only the scenario driver may commit during a run — any other push changes the
 revision every app sees.
 
-## Scenarios and observed results
+## Scenarios
 
-Times are relative to the release commit push, ArgoCD v3.4.5 on kind, 2 s sampling.
+Times are relative to the release commit push, measured on the two-cluster lab.
 Each scenario converges its own profile first, so they can run in any order.
 
-### The design — app-of-apps, migrations as the parent's PreSync (`layout: appofapps`)
-
-| # | Run | What it proves | Observed |
+| # | Run | What it shows | Observed |
 |---|---|---|---|
-| 10a | `make prepare-10a` then `make scenario-10a` | success path, watchable: tag bump in the tenant files → parent hooks → children roll | last hook +89 s → first v2 pod +92 s → Ready +95 s |
-| 10 | `make scenario-10` / `make assert-10` | full journey: release, failed migration, revert | child stayed Synced/Healthy through the whole hook run; failed migration ⇒ parent `Failed` +384 s, no v3 pod ever created, v2 served 447 s; revert applied +8 s with no hook re-run |
+| 1 | `make scenario-1` / `make assert-1` | **the problem** — harmony today (`layout: appsets`, per-service AppSets each running their own migration) | new code Ready **+9 s** while another service's migration ran on for ~2 min |
+| 10a | `make prepare-10a` then `make scenario-10a` | **the design, success path** — watchable: tag bump → parent's hook Application → migrations → children | migrations done 20:30:45, first service pod 20:30:47, subgraphs 20:30:52 |
+| 10 | `make scenario-10` / `make assert-10` | **the design, full journey** — release, failed migration, revert | failed migration ⇒ hook app Degraded, parent PreSync Failed, **no new pod ever created**, previous version served throughout; revert converges |
 
-### Baseline — harmony today (`layout: appsets`)
+The rejected alternatives that earlier versions of this lab also ran (a wave-0
+migrations app; a `migrations-complete` marker plus a `release-gate` init
+container) have been removed along with their charts — their evidence lives in
+the board review, and keeping unrunnable scenarios around was worse than
+deleting them.
 
-| # | What it asks | Observed |
-|---|---|---|
-| 1 | does today's shape keep new code from serving while another service migrates? | no — backend v2 Ready **+9 s** while subgraph-a's migration ran to +131 s |
-| 2 | is a separate migrations app at wave 0 enough? | no — all v2 pods Ready **+12 s**, migrations app still running until +140 s (app-level waves are decorative across generated apps) |
+## What the runs established
 
-### Comparison — migrations layer + runtime gate (`layout: appsets`, rejected in favour of the design)
-
-| # | What it asks | Observed |
-|---|---|---|
-| 3 / 3a | success path, failed migration, revert | no v2 pod Ready before the marker (+84 s ≤ +86 s); failure: marker unchanged, v3 never Ready, v2 served, revert 36 s |
-| 4 | same-DB hook-wave serialization | subgraph-a started 6.5 s after backend finished; own-DB job overlapped 20 s |
-| 5 | does the gate block scale-out / restarts? | no — 3 replicas Ready +11 s after the commit |
-| 6 | gate timeout shorter than the migration | init crash-loops, apps Degraded, v1 serves, self-completes +138 s |
-| 7 | release superseded mid-migration | in-flight sync not preempted; r72 landed +201 s; no unsafe pod |
-| 8 | backend-only release | subgraphs still roll + gate; 60 s |
-| 9 | rollback pointer with a completed-set marker | stable pods Ready +19 s, before hooks re-ran |
-
-Things worth knowing that came out of the runs:
-
-- ArgoCD automated syncs retry **5× by default** even with no `retry` block;
-  every retry re-creates all PreSync hooks (`BeforeHookCreation`), so hook
-  Jobs must be idempotent and a failed release reaches terminal `Failed` after
-  ~6 min.
+- A PreSync **Job** of the parent runs on the *parent's* cluster, not the
+  tenant's — measured with the same namespace present on both clusters. ArgoCD
+  has no per-resource destination (argo-cd#8944), so the migration must travel
+  inside an Application.
+- Inside that Application the migration Jobs must be **plain resources, not
+  hooks**: an app containing only hooks manages nothing, reports Synced/Healthy
+  on creation and never runs them, while the parent reports success.
+- A custom `Application` health check is required, and must treat
+  `Synced + Healthy` as Healthy even when the last operation failed — otherwise a
+  parent stalls after a revert whose manifests are unchanged.
+- ArgoCD does not preempt an in-flight sync: a wedged parent needs
+  `argocd app terminate-op`; pushing a new commit does nothing.
 - `kubectl scale` on an automated+selfHeal app is reverted within seconds —
   scale through git or an HPA.
-- A new commit does not preempt an in-flight sync operation.
-- Pruning a parent Application cascade-deletes its children (finalizer) —
-  relevant for any cutover between layouts (and for the AppSet → parent cutover).
-- `helm.fileParameters` accepts `$values/...` refs (multi-source) on 3.4.5,
-  and inline `helm.values` take precedence over `valueFiles`.
-- A custom `Application` health check must treat `Synced + Healthy` as
-  Healthy even when the last operation failed, or a parent stalls after a
-  revert whose manifests are unchanged.
+- `helm.fileParameters` accepts `$values/...` refs, and `helm.parameters`
+  (`--set`) outranks both inline values and `valueFiles`.
 
 ## Layout of the repo
 

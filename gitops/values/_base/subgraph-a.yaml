@@ -3,5 +3,3 @@ db:
   name: main
 migrations:
   enabled: false
-gate:
-  enabled: false

@@ -28,7 +28,7 @@ kubectl get applications.argoproj.io -n argocd \
 
 for ns in acme globex; do
   echo
-  echo "== tenant $ns: marker releaseId=$(kubectl get configmap migrations-complete -n "$ns" -o jsonpath='{.data.releaseId}' 2>/dev/null || echo '<none>') completed=[$(kubectl get configmap migrations-complete -n "$ns" -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null | sed -n 's/^completed\.//p' | sort | tr '\n' ',')] =="
+  echo "== tenant $ns =="
   kubectl get pods -n "$ns" -L version,release-id --no-headers 2>/dev/null \
     -o custom-columns='POD:.metadata.name,VERSION:.metadata.labels.version,RELEASE:.metadata.labels.release-id,READY:.status.conditions[?(@.type=="Ready")].status,PHASE:.status.phase' || true
 done

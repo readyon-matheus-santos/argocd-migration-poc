@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # `make seed`: default profile (the app-of-apps design) at r0/v1 for both tenants;
 # commit+push only if the tree differs; wait for full convergence and both
-# markers == r0. Doubles as the whole-stack smoke test.
+# every Application Synced/Healthy. Doubles as the whole-stack smoke test.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/env.sh"

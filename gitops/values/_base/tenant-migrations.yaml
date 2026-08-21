@@ -1,2 +1,0 @@
-# Service list (db grouping) is tenant-independent; per-tenant files carry
-# releaseId + per-service version/sleep/fail for the current release.
