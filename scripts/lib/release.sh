@@ -35,7 +35,10 @@ YAML
   done
 }
 
-# write_tenant_values <tenant> <releaseId> <version> [svc=sleepSeconds ...] [fail:svc ...] [gateTimeout:N] [progressDeadline:N] [version:svc=vX ...]
+# write_tenant_values <tenant> <releaseId> <version>
+# Writes ONLY the per-service tenant files. There is deliberately no
+# tenant-migrations file: the migration Application is rendered by the parent
+# chart, which reads the image/version out of these same per-service files. [svc=sleepSeconds ...] [fail:svc ...] [gateTimeout:N] [progressDeadline:N] [version:svc=vX ...]
 #   Regenerates the four gitops/values/_tenants/<tenant>/*.yaml files.
 write_tenant_values() {
   local tenant="$1" release="$2" version="$3"; shift 3
@@ -80,22 +83,5 @@ write_tenant_values() {
       fi
     } > "$dir/$svc.yaml"
   done
-  {
-    echo "releaseId: $release"
-    if [[ -n "$keep" ]]; then
-      echo "previousReleaseIds: [${keep}]"
-    else
-      echo "previousReleaseIds: []"
-    fi
-    echo "services:"
-    for svc in backend subgraph-a subgraph-b; do
-      case "$svc" in subgraph-b) db=subgraph_b ;; *) db=main ;; esac
-      echo "  - name: $svc"
-      echo "    db: $db"
-      echo "    version: ${ver[$svc]}"
-      echo "    sleepSeconds: ${sleep[$svc]}"
-      echo "    fail: ${fail[$svc]}"
-    done
-  } > "$dir/tenant-migrations.yaml"
 }
 
