@@ -1,18 +1,18 @@
-releaseId: r0
+releaseId: r2
 previousReleaseIds: []
 services:
   - name: backend
     db: main
-    version: v1
+    version: v3
     sleepSeconds: 2
     fail: false
   - name: subgraph-a
     db: main
-    version: v1
+    version: v3
     sleepSeconds: 2
     fail: false
   - name: subgraph-b
     db: subgraph_b
-    version: v1
+    version: v3
     sleepSeconds: 2
     fail: false
