@@ -1,0 +1,21 @@
+# One block per migrating service, keyed by the dependency alias. Everything the
+# parent knows about the release is passed here by the hook Application; the
+# service chart renders its migration Job and nothing else (migrationsOnly).
+#
+#   <alias>:
+#     enabled: true
+#     migrationsOnly: true
+#     name: backend            # service identity, as in values/_base/<svc>.yaml
+#     db: {name: main}
+#     releaseId: r3
+#     version: v2
+#     migrations: {sleepSeconds: 2, fail: false, wave: "0"}
+backend:
+  enabled: false
+  migrationsOnly: true
+subgraph-a:
+  enabled: false
+  migrationsOnly: true
+subgraph-b:
+  enabled: false
+  migrationsOnly: true

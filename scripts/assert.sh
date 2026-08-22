@@ -42,7 +42,7 @@ case "$N" in
   P="$RUN_DIR/phases.tsv"; ph() { awk -F'\t' -v k="$1" '$1==k{print $2}' "$P"; }
   p1="$(ph r131_push)"; p2="$(ph r132_push)"; pf="$(ph parent_failed)"; rp="$(ph revert_push)"; rd="$(ph revert_done)"
   # hooks done = last-wave hook Job (migrate-subgraph-a) of r131 succeeded
-  m="$(awk -F'\t' -v a="$p1" '$1>=a&&$2=="job"&&$3=="acme"&&$4=="migrate-subgraph-a"&&$5=="r131"&&$7+0>0{print $1; exit}' "$S")"
+  m="$(awk -F'\t' -v a="$p1" '$1>=a&&$2=="job"&&$3=="acme"&&$4~/^subgraph-a-migrate-r131-/&&$5=="r131"&&$7+0>0{print $1; exit}' "$S")"
   v2first="$(awk -F'\t' -v a="$p1" '$1>=a&&$2=="pod"&&$3=="acme"&&$5=="v2"{print $1; exit}' "$S")"; v2ready="$(awk -F'\t' -v a="$p1" '$1>=a&&$2=="pod"&&$3=="acme"&&$5=="v2"&&$7=="True"{print $1; exit}' "$S")"
   [[ -n "$m" && -n "$v2first" && "$v2first" -ge "$m" ]] && pass "S10-1 no v2 pod existed before the parent's PreSync migrations completed: last hook succeeded at +$((m-p1))s, first v2 pod +$((v2first-p1))s, Ready +$((v2ready-p1))s" || fail "S10-1 v2 pod at ${v2first:-never}, last hook at ${m:-never}"
   oos="$(awk -F'\t' -v a="$p1" -v m="$m" '$1>=a&&$1<m&&$2=="app"&&$3=="acme"&&$4~/^(backend|subgraph-a|subgraph-b)-acme$/&&($5!="Synced"||$7=="Running"){print $1":"$4}' "$S" | head -3)"

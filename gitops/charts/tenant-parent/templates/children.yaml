@@ -1,4 +1,3 @@
-{{- if eq (.Values.mode | default "parent") "parent" }}
 {{- $repo := required "repoURL" .Values.repoURL }}
 {{- $rev := required "targetRevision" .Values.targetRevision }}
 {{- $waves := dict "backend" "2" "subgraph-a" "4" "subgraph-b" "4" }}
@@ -42,5 +41,4 @@ spec:
   syncPolicy:
     automated: {prune: true, selfHeal: true}
     syncOptions: [CreateNamespace=true]
-{{- end }}
 {{- end }}

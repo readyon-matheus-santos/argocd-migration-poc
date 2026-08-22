@@ -14,9 +14,11 @@ The lab repo is itself the ArgoCD source: everything ArgoCD reads lives under
 ```
 CONTROL cluster (kind: argocd-migration-poc)          ~ harmony-platform-use2
   ArgoCD + every Application object
-  └─ tenant-<tenant>            the parent, one per tenant
+  └─ tenant-<tenant>            the parent, one per tenant (chart: tenant-parent, renders ONLY Applications)
        ├─ PreSync ─► tenant-migrations-<tenant>       an Application, destination = workload cluster
-       │                └─ the migration Jobs (plain resources, hook waves for same-DB order)
+       │                chart: tenant-migrations = each migrating service's OWN chart as a
+       │                dependency with migrationsOnly=true → its migration Job as a plain
+       │                resource (sync-waves for same-DB order; name hashed per release)
        └─ Sync ────► backend-<tenant> (wave 2), subgraph-a/-b-<tenant> (wave 4)
 
 WORKLOAD cluster (kind: ...-workload)                 ~ harmony-nonprod-use2
@@ -129,7 +131,10 @@ deleting them.
 ```
 bootstrap/   cluster/ArgoCD install, repo secret, root app template, status/teardown
 gitops/      what ArgoCD reads: root chart + AppSets, charts, values, tenants.yaml
-  charts/tenant-parent/          the working demo (fake services, runs in the lab)
+  charts/tenant-parent/          the working demo: parent chart, renders the hook Application + children
+  charts/tenant-migrations/      wrapper chart the hook Application points at: the service charts as
+                                 aliased dependencies, migrationsOnly=true
+  charts/fake-service/           the stand-in service; migrationsOnly renders just its migration Job
   charts/tenant-parent-harmony/  the deliverable: the chart + ApplicationSet as they
                                  would ship to harmony, with the real per-service
                                  values copied in (AWS account ids redacted)
