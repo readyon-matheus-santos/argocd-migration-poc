@@ -20,7 +20,7 @@ SERVICES=(backend subgraph-a subgraph-b)
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 
 tenant_app_list() { local t="$1" s; for s in postgres backend subgraph-a subgraph-b; do echo "$s-$t"; done; }
-hook_apps() { local t s; for t in acme globex; do for s in backend subgraph-a subgraph-b; do echo "tenant-migrations-$s-$t"; done; done; }
+hook_apps() { echo "tenant-migrations-acme tenant-migrations-globex"; }
 
 # converge_baseline <profile> <releaseId>
 converge_baseline() {

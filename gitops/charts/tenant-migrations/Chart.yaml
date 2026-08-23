@@ -1,0 +1,5 @@
+apiVersion: v2
+name: tenant-migrations
+description: The tenant's migration Jobs - what the parent's PreSync hook Application deploys on the tenant cluster. One Job per migrating service, plain resources named per release, sync-waves serialize services that share a database
+type: application
+version: 0.1.0

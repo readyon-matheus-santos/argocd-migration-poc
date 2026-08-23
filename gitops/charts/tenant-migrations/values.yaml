@@ -1,0 +1,17 @@
+# Passed by the parent's hook Application (gitops/charts/tenant-parent/templates/migration.yaml).
+releaseId: r0
+# One entry per migrating service. Services sharing a `db` are serialized by
+# sync-wave in list order; different databases migrate in parallel.
+#   - name: backend
+#     db: main
+#     version: v2
+#     sleepSeconds: 2
+#     fail: false
+services: []
+db:
+  host: postgres
+  port: 5432
+  secretName: postgres-creds
+image:
+  repository: postgres
+  tag: "16"

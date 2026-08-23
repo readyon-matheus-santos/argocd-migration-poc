@@ -16,14 +16,9 @@ db:
   port: 5432
   secretName: postgres-creds
 
-# Render ONLY the migration Job, as a plain (non-hook) resource named per
-# release. Set by the parent's PreSync hook Application for this service, which
-# runs on the tenant cluster. Never set it in a service's own values.
-migrationsOnly: false
-
 # Per-service PreSync migration Job owned by THIS service's Application
-# (the S1 baseline shape). Off in the default profile: the parent's hook
-# Applications carry the Jobs instead.
+# (the S1 baseline shape). Off in the default profile: the Migrations Layer
+# carries the Jobs instead.
 migrations:
   enabled: false
   sleepSeconds: 2

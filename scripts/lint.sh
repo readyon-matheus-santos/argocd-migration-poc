@@ -6,7 +6,7 @@ cd "$LAB_ROOT"
 helm lint gitops/root --set repoURL=https://example.invalid/x.git --set targetRevision=main
 helm lint gitops/charts/postgres
 helm lint gitops/charts/fake-service --set name=backend
-helm lint gitops/charts/fake-service --set name=backend --set migrationsOnly=true
+helm lint gitops/charts/tenant-migrations --set releaseId=r0 --set "services[0].name=backend" --set "services[0].db=main" --set "services[0].version=v1"
 helm lint gitops/charts/tenant-parent --set repoURL=https://example.invalid/x.git --set targetRevision=main --set tenant=acme --set namespace=acme
 helm lint gitops/charts/tenant-parent-harmony -f gitops/charts/tenant-parent-harmony/ci/armk-prod-use2-values.yaml
 helm template t gitops/charts/tenant-parent-harmony -f gitops/charts/tenant-parent-harmony/ci/armk-prod-use2-values.yaml >/dev/null

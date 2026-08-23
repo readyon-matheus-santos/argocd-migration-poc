@@ -1,39 +1,14 @@
-{{- if or .Values.migrationsOnly .Values.migrations.enabled }}
-{{- $name := include "fake-service.name" . }}
-{{- /*
-Two shapes from one template:
-
-  migrationsOnly=false (harmony today / S1): the service's own PreSync hook,
-  BeforeHookCreation, fixed name. Runs on every sync of the service app.
-
-  migrationsOnly=true (the design): a PLAIN resource, the only thing rendered,
-  inside the parent's per-service PreSync hook Application.
-  Plain rather than a hook because an app whose contents are all hooks manages
-  nothing — it reports Synced/Healthy on creation and never runs them. As a
-  managed resource the Job's own health gates the parent.
-
-  A Job spec is immutable, so the name carries a hash of everything that shapes
-  the spec: any change is a fresh Job (a create), never an in-place mutation —
-  which is what Replace=true tried and failed to do (selector/template are
-  immutable and the API server adds the selector itself).
-*/ -}}
-{{- $fingerprint := printf "%s|%s|%s|%s|%s|%s|%s:%s" $name .Values.releaseId .Values.version .Values.db.name (.Values.migrations.sleepSeconds | toString) (.Values.migrations.fail | toString) .Values.migrations.image.repository .Values.migrations.image.tag }}
-{{- $jobName := printf "%s-migrate" $name }}
-{{- if .Values.migrationsOnly }}
-{{- $jobName = printf "%s-migrate-%s-%s" $name .Values.releaseId ($fingerprint | sha256sum | trunc 8) }}
-{{- end }}
+{{- if .Values.migrations.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ $jobName }}
+  name: {{ include "fake-service.name" . }}-migrate
   labels:
     {{- include "fake-service.labels" . | nindent 4 }}
     job-role: migration
   annotations:
-    {{- if not .Values.migrationsOnly }}
     argocd.argoproj.io/hook: PreSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    {{- end }}
 spec:
   backoffLimit: 0
   template:
@@ -68,7 +43,7 @@ spec:
             - name: FAIL
               value: {{ .Values.migrations.fail | quote }}
             - name: SVC_NAME
-              value: {{ $name | quote }}
+              value: {{ include "fake-service.name" . | quote }}
             - name: VERSION
               value: {{ .Values.version | quote }}
             - name: RELEASE_ID
