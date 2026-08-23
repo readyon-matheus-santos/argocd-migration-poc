@@ -52,3 +52,30 @@ standby→active commit that lands early from migrating a read replica — board
 true
 {{- end -}}
 {{- end -}}
+
+{{/*
+Every image tag in a tenant file, wherever it sits — `image.tag`,
+`router.image.tag`, `jobs.<name>.image.tag` — as `<path>: <tag>` lines. Each
+becomes a helm.parameters pin on the child, so a tag bump in the tenant file
+moves the child only when the parent re-renders.
+*/}}
+{{- define "tp.walkTags" -}}
+{{- $node := .node -}}{{- $prefix := .prefix -}}
+{{- if kindIs "map" $node -}}
+{{- range $k, $v := $node -}}
+{{- $p := ternary $k (printf "%s.%s" $prefix $k) (eq $prefix "") -}}
+{{- if and (eq $k "image") (kindIs "map" $v) (hasKey $v "tag") (not (kindIs "map" (get $v "tag"))) }}
+{{ $p }}.tag: {{ get $v "tag" | toString | quote }}
+{{- else -}}
+{{- include "tp.walkTags" (dict "node" $v "prefix" $p) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "tp.tagPins" -}}
+{{- $raw := index .root.Values.tenantFiles .key | default "" -}}
+{{- if $raw -}}
+{{- include "tp.walkTags" (dict "node" ($raw | fromYaml) "prefix" "") -}}
+{{- end -}}
+{{- end -}}

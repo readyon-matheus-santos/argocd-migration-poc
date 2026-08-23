@@ -219,6 +219,8 @@ spec:
                   chart: readyon-helm-charts/graphql
                   targetRevision: "0.10.3"
                   wave: "4"
+                  releaseName: 'graphql-services-{{.tenant}}-{{.shortName}}'
+                  ignoreMissingValueFiles: true
                   valueFiles:
                     - $values/values/_base/build-shift.yaml
                     - $values/values/shared-prod.yaml
@@ -269,6 +271,8 @@ spec:
                   chart: readyon-helm-charts/graphql
                   targetRevision: "0.10.3"
                   wave: "4"
+                  releaseName: 'graphql-services-{{.tenant}}-{{.shortName}}'
+                  ignoreMissingValueFiles: true
                   valueFiles:
                     - $values/values/_base/org-hierarchy.yaml
                     - $values/values/shared-prod.yaml
@@ -319,6 +323,8 @@ spec:
                   chart: readyon-helm-charts/graphql
                   targetRevision: "0.10.3"
                   wave: "4"
+                  releaseName: 'graphql-services-{{.tenant}}-{{.shortName}}'
+                  ignoreMissingValueFiles: true
                   valueFiles:
                     - $values/values/_base/rbac.yaml
                     - $values/values/shared-prod.yaml
@@ -374,6 +380,8 @@ spec:
                   chart: readyon-helm-charts/graphql
                   targetRevision: "0.10.3"
                   wave: "4"
+                  releaseName: 'graphql-services-{{.tenant}}-{{.shortName}}'
+                  ignoreMissingValueFiles: true
                   valueFiles:
                     - $values/values/_base/shift-management.yaml
                     - $values/values/shared-prod.yaml
@@ -426,6 +434,8 @@ spec:
                   chart: readyon-helm-charts/graphql
                   targetRevision: "0.10.3"
                   wave: "4"
+                  releaseName: 'graphql-services-{{.tenant}}-{{.shortName}}'
+                  ignoreMissingValueFiles: true
                   valueFiles:
                     - $values/values/_base/user-management.yaml
                     - $values/values/shared-prod.yaml
@@ -478,6 +488,8 @@ spec:
                   chart: readyon-helm-charts/graphql
                   targetRevision: "0.10.3"
                   wave: "4"
+                  releaseName: 'graphql-services-{{.tenant}}-{{.shortName}}'
+                  ignoreMissingValueFiles: true
                   valueFiles:
                     - $values/values/_base/work-rule.yaml
                     - $values/values/shared-prod.yaml
@@ -574,6 +586,7 @@ spec:
                   chart: readyon-helm-charts/monitoring-cronjobs
                   targetRevision: "1.1.6"
                   wave: "4"
+                  ignoreDifferences: []
                   valueFiles:
                     - $values/values/_base/monitoring-cronjobs.yaml
                     - $values/values/shared-prod.yaml
@@ -598,6 +611,7 @@ spec:
                   chart: readyon-helm-charts/apollo-router
                   targetRevision: "1.11.2"
                   wave: "5"
+                  ignoreMissingValueFiles: true
                   valueFiles:
                     - $values/values/_base/apollo-router.yaml
                     - $values/values/shared-prod.yaml

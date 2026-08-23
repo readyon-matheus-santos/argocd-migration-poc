@@ -16,7 +16,6 @@ rename — would otherwise cascade-delete live workload instead of being orphane
 {{- $root := . }}
 {{- range $key, $cfg := .Values.children }}
 {{- if eq (include "tp.enabled" (dict "cfg" $cfg)) "true" }}
-{{- $tag := include "tp.tag" (dict "root" $root "key" $key "required" false) }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -34,27 +33,36 @@ spec:
       chart: {{ $cfg.chart | quote }}
       targetRevision: {{ $cfg.targetRevision | quote }}
       helm:
+        {{- with $cfg.releaseName }}
+        releaseName: {{ . | quote }}
+        {{- end }}
         {{- with $cfg.valueFiles }}
         valueFiles:
           {{- toYaml . | nindent 10 }}
         {{- end }}
+        {{- if $cfg.ignoreMissingValueFiles }}
         ignoreMissingValueFiles: true
+        {{- end }}
         {{- with $cfg.values }}
         values: |
           {{- . | trimSuffix "\n" | nindent 10 }}
         {{- end }}
+        {{- $pins := include "tp.tagPins" (dict "root" $root "key" $key) | fromYaml }}
+        {{- if or $pins $cfg.disableMigrations }}
+        # Highest-precedence pins (--set outranks valueFiles). The tenant file
+        # still carries the tags for the release bot to write; these are what
+        # actually move the child, and only the parent sets them — which is
+        # what makes the ordering hold.
         parameters:
-          {{- if $tag }}
-          # Highest-precedence pin. The tenant file still carries image.tag for
-          # the release bot to write; this is what actually moves the child, and
-          # only the parent can set it — which is what makes the ordering hold.
-          - name: image.tag
+          {{- range $path, $tag := $pins }}
+          - name: {{ $path }}
             value: {{ $tag | quote }}
           {{- end }}
           {{- if $cfg.disableMigrations }}
           - name: migrations.enabled
             value: "false"
           {{- end }}
+        {{- end }}
     - repoURL: {{ $root.Values.valuesSource.repoURL | quote }}
       targetRevision: {{ $root.Values.valuesSource.targetRevision | quote }}
       ref: values
@@ -72,7 +80,8 @@ spec:
     managedNamespaceMetadata:
       {{- toYaml . | nindent 6 }}
     {{- end }}
-  {{- with $root.Values.childDefaults.ignoreDifferences }}
+  {{- $ignore := ternary $cfg.ignoreDifferences $root.Values.childDefaults.ignoreDifferences (hasKey $cfg "ignoreDifferences") }}
+  {{- with $ignore }}
   ignoreDifferences:
     {{- toYaml . | nindent 4 }}
   {{- end }}

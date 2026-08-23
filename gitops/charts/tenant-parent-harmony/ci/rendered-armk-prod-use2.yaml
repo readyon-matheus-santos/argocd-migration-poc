@@ -57,7 +57,6 @@ spec:
             OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.armk-prod.svc.cluster.local:4318/v1/metrics"
             OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.armk-prod.svc.cluster.local:4318/v1/traces"
           ""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values
@@ -102,7 +101,6 @@ spec:
           - $values/values/shared-prod.yaml
           - $values/values/_regions/use2/backend-region.yaml
           - $values/values/_tenants/armk-prod/backend-tenant.yaml
-        ignoreMissingValueFiles: true
         values: |
           aws:
             accountId: "<PROD_ACCOUNT_ID>"
@@ -155,10 +153,11 @@ spec:
           region:
             role: ""
             replicaMultiplier: ""
+        # Highest-precedence pins (--set outranks valueFiles). The tenant file
+        # still carries the tags for the release bot to write; these are what
+        # actually move the child, and only the parent sets them — which is
+        # what makes the ordering hold.
         parameters:
-          # Highest-precedence pin. The tenant file still carries image.tag for
-          # the release bot to write; this is what actually moves the child, and
-          # only the parent can set it — which is what makes the ordering hold.
           - name: image.tag
             value: "v1.0.7-prod-20260817-235744-4105f710"
           - name: migrations.enabled
@@ -207,7 +206,6 @@ spec:
           - $values/values/shared-prod.yaml
           - $values/values/_regions/use2/backend-crons-region.yaml
           - $values/values/_tenants/armk-prod/backend-crons-tenant.yaml
-        ignoreMissingValueFiles: true
         values: |
           aws:
             accountId: "<PROD_ACCOUNT_ID>"
@@ -233,7 +231,6 @@ spec:
           region:
             role: ""
             replicaMultiplier: ""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values
@@ -273,6 +270,7 @@ spec:
       chart: "readyon-helm-charts/graphql"
       targetRevision: "0.10.3"
       helm:
+        releaseName: "graphql-services-armk-prod-use2"
         valueFiles:
           - $values/values/_base/build-shift.yaml
           - $values/values/shared-prod.yaml
@@ -317,7 +315,6 @@ spec:
           # usw2 (standby) has no live graphql pods; keep the standalone disabled there.
           enabled: false
           ""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values
@@ -362,7 +359,6 @@ spec:
           - $values/values/shared-prod.yaml
           - $values/values/_regions/use2/monitoring-cronjobs-region.yaml
           - $values/values/_tenants/armk-prod/monitoring-cronjobs-tenant.yaml
-        ignoreMissingValueFiles: true
         values: |
           environment: "prod"
           client: "armk"
@@ -375,7 +371,6 @@ spec:
             OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.armk-prod.svc.cluster.local:4318/v1/metrics"
             OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.armk-prod.svc.cluster.local:4318/v1/traces"
           ""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values
@@ -389,11 +384,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-  ignoreDifferences:
-    - group: apps
-      jsonPointers:
-      - /spec/replicas
-      kind: Deployment
 ---
 # Source: tenant-parent-harmony/templates/children.yaml
 apiVersion: argoproj.io/v1alpha1
@@ -420,7 +410,6 @@ spec:
           - $values/values/shared-prod.yaml
           - $values/values/_regions/use2/notifications-orchestrator-region.yaml
           - $values/values/_tenants/armk-prod/notifications-orchestrator-tenant.yaml
-        ignoreMissingValueFiles: true
         values: |
           aws:
             accountId: "<PROD_ACCOUNT_ID>"
@@ -445,7 +434,6 @@ spec:
             ENV: "production"
             NODE_ENV: "production"
             READYON_FCM_APP_ID: "" "readyon""" "readyon-prod"""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values
@@ -485,6 +473,7 @@ spec:
       chart: "readyon-helm-charts/graphql"
       targetRevision: "0.10.3"
       helm:
+        releaseName: "graphql-services-armk-prod-use2"
         valueFiles:
           - $values/values/_base/org-hierarchy.yaml
           - $values/values/shared-prod.yaml
@@ -529,7 +518,6 @@ spec:
           # usw2 (standby) has no live graphql pods; keep the standalone disabled there.
           enabled: false
           ""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values
@@ -569,6 +557,7 @@ spec:
       chart: "readyon-helm-charts/graphql"
       targetRevision: "0.10.3"
       helm:
+        releaseName: "graphql-services-armk-prod-use2"
         valueFiles:
           - $values/values/_base/rbac.yaml
           - $values/values/shared-prod.yaml
@@ -618,10 +607,11 @@ spec:
           # there (region/tenant layers can't override this reliably).
           enabled: false
           ""
+        # Highest-precedence pins (--set outranks valueFiles). The tenant file
+        # still carries the tags for the release bot to write; these are what
+        # actually move the child, and only the parent sets them — which is
+        # what makes the ordering hold.
         parameters:
-          # Highest-precedence pin. The tenant file still carries image.tag for
-          # the release bot to write; this is what actually moves the child, and
-          # only the parent can set it — which is what makes the ordering hold.
           - name: image.tag
             value: "v1.0.7-prod-20260817-235744-4105f710"
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
@@ -663,6 +653,7 @@ spec:
       chart: "readyon-helm-charts/graphql"
       targetRevision: "0.10.3"
       helm:
+        releaseName: "graphql-services-armk-prod-use2"
         valueFiles:
           - $values/values/_base/shift-management.yaml
           - $values/values/shared-prod.yaml
@@ -709,7 +700,6 @@ spec:
           # usw2 (standby) has no live graphql pods; keep the standalone disabled there.
           enabled: false
           ""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values
@@ -749,6 +739,7 @@ spec:
       chart: "readyon-helm-charts/graphql"
       targetRevision: "0.10.3"
       helm:
+        releaseName: "graphql-services-armk-prod-use2"
         valueFiles:
           - $values/values/_base/user-management.yaml
           - $values/values/shared-prod.yaml
@@ -795,7 +786,6 @@ spec:
           # usw2 (standby) has no live graphql pods; keep the standalone disabled there.
           enabled: false
           ""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values
@@ -835,6 +825,7 @@ spec:
       chart: "readyon-helm-charts/graphql"
       targetRevision: "0.10.3"
       helm:
+        releaseName: "graphql-services-armk-prod-use2"
         valueFiles:
           - $values/values/_base/work-rule.yaml
           - $values/values/shared-prod.yaml
@@ -889,7 +880,6 @@ spec:
           # there (region/tenant layers can't override this reliably).
           enabled: false
           ""
-        parameters:
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values

@@ -1,4 +1,4 @@
-{{- if include "tp.migrationsActive" . }}
+{{- if and (include "tp.migrationsActive" .) .Values.migrations.services }}
 {{- /*
 The tenant's migrations, as the parent's ONE PreSync hook: an Application whose
 destination is the tenant cluster and whose source is the tenant-migrations
@@ -9,7 +9,7 @@ Why an Application and not a Job: hooks are resources of the parent, and every
 resource of an Application is applied to that Application's single
 spec.destination — the platform cluster, the only place Application CRs exist. A
 Job hook would run there: no tenant database, no tenant secrets, wrong AWS
-account. Verified in this lab, twice. ArgoCD has no per-resource destination
+account (measured in the POC lab). ArgoCD has no per-resource destination
 (argo-cd#8944, open), so only an Application — which carries its own destination
 — reaches the tenant, and it keeps the PreSync ordering exactly.
 
