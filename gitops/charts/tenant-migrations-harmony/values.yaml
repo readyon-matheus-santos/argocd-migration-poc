@@ -1,0 +1,26 @@
+# Passed by the parent's hook Application (tenant-parent-harmony/templates/migration.yaml);
+# nothing here is read from value layers.
+tenant: ""            # armk-prod
+client: ""            # armk
+env: ""               # prod
+namespace: ""         # armk-prod
+
+# One entry per migrating service. This chart is the ONE place a parent-managed
+# tenant's migration Job is defined: once every tenant is on the parent, the
+# service chart's own PreSync Job template is dead code and can be removed.
+# Services sharing a `db` are serialized by sync-wave in list order; different
+# databases migrate in parallel.
+services: []
+#  - name: backend
+#    db: main
+#    image:
+#      repository: <ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/readyon-backend
+#      tag: v1.0.7-prod-...            # set by the parent from the tenant file
+#    command: ["npm", "run", "db:migrate"]
+#    externalSecretName: backend-migrations-db-secrets
+#    env:                              # A7: migration talks straight to Aurora
+#      TYPEORM_SSL_MODE: "true"
+#      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+#    backoffLimit: 3
+#    activeDeadlineSeconds: 10800
+#    ttlSecondsAfterFinished: 300

@@ -9,6 +9,7 @@ helm lint gitops/charts/fake-service --set name=backend
 helm lint gitops/charts/tenant-migrations --set releaseId=r0 --set "services[0].name=backend" --set "services[0].db=main" --set "services[0].version=v1"
 helm lint gitops/charts/tenant-parent --set repoURL=https://example.invalid/x.git --set targetRevision=main --set tenant=acme --set namespace=acme
 helm lint gitops/charts/tenant-parent-harmony -f gitops/charts/tenant-parent-harmony/ci/armk-prod-use2-values.yaml
+helm lint gitops/charts/tenant-migrations-harmony --set namespace=x --set "services[0].name=backend" --set "services[0].db=main" --set "services[0].image.repository=r" --set "services[0].image.tag=t"
 helm template t gitops/charts/tenant-parent-harmony -f gitops/charts/tenant-parent-harmony/ci/armk-prod-use2-values.yaml >/dev/null
 if grep -rqE "\b(9511139|9757074|1161535)[0-9]{5}\b" gitops/ ; then echo "AWS account id in a public repo" >&2; exit 1; fi
 

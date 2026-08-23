@@ -564,7 +564,15 @@ children:
 
 migrations:
   enabled: true
+  chart: readyon-helm-charts/tenant-migrations
+  targetRevision: "0.1.0"
   retryLimit: 0
   services:
     - name: backend
-      wave: "0"
+      db: main
+      image:
+        repository: <PROD_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/readyon-backend
+      externalSecretName: backend-migrations-db-secrets
+      env:
+        TYPEORM_SSL_MODE: "true"
+        NODE_TLS_REJECT_UNAUTHORIZED: "0"

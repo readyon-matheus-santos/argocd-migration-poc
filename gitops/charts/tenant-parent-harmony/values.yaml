@@ -1,9 +1,8 @@
 # tenant-parent-harmony — the chart as it would be published to platform ECR as
 # readyon-helm-charts/tenant-parent and consumed by applicationsets/<env>/tenant-parent.yaml.
 #
-# It renders Application objects and nothing else: the children, and one PreSync
-# hook Application per migrating service that points at that service's own chart
-# with migrationsOnly=true (see README).
+# It renders Application objects and nothing else: the children, and ONE PreSync
+# hook Application that deploys the tenant-migrations chart on the tenant cluster.
 
 # ---------------------------------------------------------------- identity ---
 # Supplied by the ApplicationSet generator (configs/tenants.yaml × configs/regions.yaml).
@@ -105,12 +104,24 @@ children:
 # ----------------------------------------------------------- the migration ---
 migrations:
   enabled: true
+  # The chart the hook Application deploys on the tenant cluster.
+  chart: readyon-helm-charts/tenant-migrations
+  targetRevision: "0.1.0"
   # The hook Application's own retry. 0 = exactly one migration attempt per
   # parent attempt, so parent retries are not multiplied by app retries.
   retryLimit: 0
-  # Children that own a schema. Each becomes a PreSync hook Application pointing
-  # at that child's chart (same valueFiles/values) with migrationsOnly=true.
-  # `wave` orders hooks: services sharing a database go in later waves.
+  # One entry per child that owns a schema; `name` keys into `children` and the
+  # image.tag is pinned from that child's tenant file. Rendered from the backend
+  # chart's own values so the Job matches what backend runs today (TLS toggles,
+  # pgBouncer bypass). Services sharing a `db` migrate in list order.
   services:
     - name: backend
-      wave: "0"
+      db: main
+      image:
+        repository: ""            # <ACCOUNT_ID>.dkr.ecr.<region>.amazonaws.com/readyon-backend
+      command: ["npm", "run", "db:migrate"]
+      externalSecretName: backend-migrations-db-secrets
+      env: {}
+      backoffLimit: 3
+      activeDeadlineSeconds: 10800
+      ttlSecondsAfterFinished: 300

@@ -49,3 +49,9 @@ spec:
         automated:
           prune: true
           selfHeal: true
+        # No retries: a retry re-creates the hook Application around the same
+        # (hash-named) failed Job and fails instantly, and BeforeHookCreation
+        # deletes the hook app on every retry — the last one leaves nothing to
+        # inspect. ArgoCD's automated-sync default is 5.
+        retry:
+          limit: 0

@@ -14,12 +14,11 @@ fake services; this folder is the deliverable.
 tenant-<tenant>-<region>            Application, destination: platform cluster / argocd
 │                                   (renders Application objects and nothing else)
 │
-├─ PreSync ──► Application  tenant-migrations-backend-<tenant>-<region>     one per schema owner
+├─ PreSync ──► Application  tenant-migrations-<tenant>-<region>
 │                 destination: <tenant cluster> / <tenant namespace>
-│                 source: readyon-helm-charts/backend — the SAME chart, valueFiles and inline
-│                         values as the backend child, plus migrationsOnly=true and the tag pin
+│                 source: readyon-helm-charts/tenant-migrations (../tenant-migrations-harmony)
 │                 └─ Job  backend-migrations-<hash>   (plain resource, named per release)
-│                    ExternalSecret backend-migrations-db-secrets
+│                    …one per entry in migrations.services; same-db entries in later waves
 │
 └─ Sync ─────► child Applications, destination: <tenant cluster> / <tenant namespace>
                   wave 2  backend, backend-crons
@@ -34,25 +33,22 @@ commit — their tag is pinned by the parent via `helm.parameters`, which outran
 `valueFiles`. The parent does move, runs the migration, then re-pins the
 children. That is the whole ordering guarantee.
 
-## The migration Job stays in the service's own chart
+## The migration Jobs live in one chart
 
-The hook Application does not carry a Job template of its own. It points at the
-migrating service's chart (`readyon-helm-charts/backend`) with the exact value
-layers the backend child uses, and sets `migrationsOnly=true` — a switch in the
-backend chart (readyon-harmony-charts, 1.11.0) that renders only the migration
-Job and its ExternalSecret, with the Job as a plain resource named per release
-instead of a PreSync hook. One Job template, owned by the service that owns the
-schema; a migration-only change (A7 TLS env, backoffLimit) lands the moment the
-tenant's value layer changes, because it changes the hash in the Job name.
+`tenant-migrations` (`../tenant-migrations-harmony`) is the one place a
+parent-managed tenant's migration Job is defined: a loop over
+`migrations.services`, each entry a service that owns a schema (today: backend),
+with the Job spec mirrored from backend's chart (A7 TLS env, direct-to-Aurora,
+backoffLimit/deadline/TTL). The parent pins each entry's `image.tag` from that
+service's tenant file and passes the list to the hook Application inline.
 
-Why not a wrapper chart with backend as a dependency: harmony's value layers are
-four `$values/...` files at the top level of backend's values, and ArgoCD cannot
-nest a `valueFiles` entry under a subchart key — so a wrapper would need its own
-copy of every value. Pointing the hook at the service chart keeps the layering
-byte-identical to the child's.
+The backend child runs with `migrations.enabled=false`. Once every tenant is on
+the parent, backend's own PreSync Job template is dead code and can be removed
+from `readyon-harmony-charts`; during the rollout both exist, so a migration-only
+change has to land in both.
 
 A second schema owner (an own-DB subgraph joining the parent) is one more entry
-in `migrations.services`; same-database services get a later `wave`.
+in `migrations.services`; entries sharing a `db` migrate in list order.
 
 ## Two things that are not optional
 
@@ -67,7 +63,6 @@ existed on the workload cluster. ArgoCD has no per-resource destination
 carries its own destination — reaches the tenant.
 
 **2. The migration Job must be a plain resource of the hook Application, not a hook inside it.**
-(`migrationsOnly=true` in the service chart is what makes it one.)
 Hooks are excluded from the sync comparison and from app health, so an
 Application whose contents are all hooks manages nothing: ArgoCD reports it
 Synced/Healthy on creation, never runs a sync, the Job never fires, and the
@@ -103,7 +98,7 @@ stall nonprod, platform and prod deployment roots on the first sync.
 | Explicit `hasKey` boolean tests | `x \| default true` swallows `false`, which silently disables every `enabled: false` escape hatch |
 | Fail-loud only on the migrating service's tag | a missing tenant file for another service must not stop the whole tenant deploying |
 | Job as a plain resource, name hashed from its spec | no marker ConfigMap needed; migration-only edits (A7 TLS toggles, backoffLimit) produce a new Job name, so they run immediately instead of wedging on an immutable field |
-| Hook points at the service chart (`migrationsOnly`), not a copy of its Job | one Job template, owned by the schema owner; value layering byte-identical to the child |
+| One `tenant-migrations` chart with a Job loop, not per-service hook apps | one app per tenant in the UI; the chart is the single definition once every tenant is on the parent |
 | The other `main` readers included | `backend-crons`, `notifications-orchestrator`, `monitoring-cronjobs` read `main_<env>` today; leaving them out breaks the stated guarantee |
 
 ## What is in this folder
@@ -114,6 +109,7 @@ stall nonprod, platform and prod deployment roots on the first sync.
 | `ci/armk-prod-use2-values.yaml` | the same content with the generator's vars resolved for armk-prod/use2, so the chart can be rendered and diffed |
 | `ci/rendered-armk-prod-use2.yaml` | the rendered output: 11 child Applications + the migration hook, ready to diff against the live apps |
 | `templates/`, `values.yaml` | the chart itself |
+| `../tenant-migrations-harmony/` | the chart the hook Application deploys: the migration Job loop |
 
 **Redaction.** This repo is public, so AWS account IDs are replaced with
 `<PLATFORM_ACCOUNT_ID>` / `<PROD_ACCOUNT_ID>` / `<NONPROD_ACCOUNT_ID>` (30
@@ -126,6 +122,9 @@ Restore them with a `sed` before using any of this in harmony.
 ```bash
 helm lint  gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml
 helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml          # 11 children + the hook app
+helm template t gitops/charts/tenant-migrations-harmony --set namespace=armk-prod \
+  --set "services[0].name=backend" --set "services[0].db=main" \
+  --set "services[0].image.repository=<ECR>/readyon-backend" --set "services[0].image.tag=<tag>"   # the Job that lands on the tenant
 helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml \
   --set region.role=standby | grep -c tenant-migrations    # → 0, no migration in the DR region
 ```

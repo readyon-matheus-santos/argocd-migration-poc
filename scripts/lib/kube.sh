@@ -79,7 +79,8 @@ wait_apps_absent() { # wait_apps_absent <timeout> <app>...
   return 1
 }
 
-app_revision() { k get application.argoproj.io "$1" -n argocd -o jsonpath='{.status.sync.revisions[0]}' 2>/dev/null; }
+# multi-source apps report .revisions[]; single-source apps (the hook app) .revision
+app_revision() { k get application.argoproj.io "$1" -n argocd -o jsonpath='{.status.sync.revisions[0]}{.status.sync.revision}' 2>/dev/null; }
 
 wait_apps_at_revision() { # wait_apps_at_revision <timeout> <sha> <app>...
   local timeout="$1" sha="$2"; shift 2

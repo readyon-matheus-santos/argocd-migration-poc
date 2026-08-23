@@ -636,10 +636,20 @@ spec:
                       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
                     {{- end }}
               migrations:
+                chart: readyon-helm-charts/tenant-migrations
+                targetRevision: "0.1.0"
                 retryLimit: 0
                 services:
                   - name: backend
-                    wave: "0"
+                    db: main
+                    image:
+                      repository: {{.accountId}}.dkr.ecr.{{.regionName}}.amazonaws.com/readyon-backend
+                    externalSecretName: backend-migrations-db-secrets
+                    # A7: the migration connects straight to Aurora, bypassing
+                    # pgBouncer, so it needs its own TLS toggles.
+                    env:
+                      TYPEORM_SSL_MODE: "true"
+                      NODE_TLS_REJECT_UNAUTHORIZED: "0"
 
         - repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
           targetRevision: main
