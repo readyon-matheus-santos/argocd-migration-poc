@@ -12,11 +12,14 @@ fake services; this folder is the deliverable.
 
 ```
 tenant-<tenant>-<region>            Application, destination: platform cluster / argocd
+│                                   (renders Application objects and nothing else)
 │
-├─ PreSync ──► Application  tenant-migrations-<tenant>-<region>
+├─ PreSync ──► Application  tenant-migrations-backend-<tenant>-<region>     one per schema owner
 │                 destination: <tenant cluster> / <tenant namespace>
-│                 └─ same chart, mode=migrations:
-│                      Job  backend-migrations-<tag>   (a plain resource, not a hook)
+│                 source: readyon-helm-charts/backend — the SAME chart, valueFiles and inline
+│                         values as the backend child, plus migrationsOnly=true and the tag pin
+│                 └─ Job  backend-migrations-<hash>   (plain resource, named per release)
+│                    ExternalSecret backend-migrations-db-secrets
 │
 └─ Sync ─────► child Applications, destination: <tenant cluster> / <tenant namespace>
                   wave 2  backend, backend-crons
@@ -31,16 +34,25 @@ commit — their tag is pinned by the parent via `helm.parameters`, which outran
 `valueFiles`. The parent does move, runs the migration, then re-pins the
 children. That is the whole ordering guarantee.
 
-## One chart, two roles
+## The migration Job stays in the service's own chart
 
-`mode: parent` renders the hook Application and the children; `mode: migrations`
-renders the migration Job. The hook Application points back at this same chart
-with `mode=migrations`.
+The hook Application does not carry a Job template of its own. It points at the
+migrating service's chart (`readyon-helm-charts/backend`) with the exact value
+layers the backend child uses, and sets `migrationsOnly=true` — a switch in the
+backend chart (readyon-harmony-charts, 1.11.0) that renders only the migration
+Job and its ExternalSecret, with the Job as a plain resource named per release
+instead of a PreSync hook. One Job template, owned by the service that owns the
+schema; a migration-only change (A7 TLS env, backoffLimit) lands the moment the
+tenant's value layer changes, because it changes the hash in the Job name.
 
-Two roles rather than two charts, so there is no second copy of backend's
-migration Job template to keep in sync. The alternative — point the hook at
-`charts/backend` with a new `migrationsOnly` flag — is equally valid and avoids
-even this copy. Open decision.
+Why not a wrapper chart with backend as a dependency: harmony's value layers are
+four `$values/...` files at the top level of backend's values, and ArgoCD cannot
+nest a `valueFiles` entry under a subchart key — so a wrapper would need its own
+copy of every value. Pointing the hook at the service chart keeps the layering
+byte-identical to the child's.
+
+A second schema owner (an own-DB subgraph joining the parent) is one more entry
+in `migrations.services`; same-database services get a later `wave`.
 
 ## Two things that are not optional
 
@@ -55,6 +67,7 @@ existed on the workload cluster. ArgoCD has no per-resource destination
 carries its own destination — reaches the tenant.
 
 **2. The migration Job must be a plain resource of the hook Application, not a hook inside it.**
+(`migrationsOnly=true` in the service chart is what makes it one.)
 Hooks are excluded from the sync comparison and from app health, so an
 Application whose contents are all hooks manages nothing: ArgoCD reports it
 Synced/Healthy on creation, never runs a sync, the Job never fires, and the
@@ -63,8 +76,10 @@ rolled, `migration_log` untouched, every Application green. As a plain resource
 the Job *is* the app's managed state, so ArgoCD's built-in Job health does the
 gating: Progressing while migrating, Healthy on success, Degraded on failure.
 Measured: hook app Progressing → Degraded on a failed migration, zero new pods
-throughout, parent PreSync `Failed`. A Job spec is immutable, so re-runnability
-comes from a per-release Job name plus `sync-options: Replace=true`.
+throughout, parent PreSync `Failed`. A Job spec is immutable, so the name carries
+a hash of everything that shapes the spec — every change is a create, never an
+in-place mutation. (`Replace=true` was tried first and fails: the API server adds
+`spec.selector` at create time and both it and the template are immutable.)
 
 **3. The `argocd-cm` Application health customization.**
 Without it an `Application` used as a hook has no health check, ArgoCD treats it
@@ -87,7 +102,8 @@ stall nonprod, platform and prod deployment roots on the first sync.
 | `retryLimit: 0` on the hook app, `retry.limit: 3` on the parent | one parent retry = exactly one fresh migration attempt, instead of retries multiplying |
 | Explicit `hasKey` boolean tests | `x \| default true` swallows `false`, which silently disables every `enabled: false` escape hatch |
 | Fail-loud only on the migrating service's tag | a missing tenant file for another service must not stop the whole tenant deploying |
-| Job as a plain resource, named per release | no marker ConfigMap needed, and migration-only edits (A7 TLS toggles, backoffLimit) change the Job manifest so they take effect immediately instead of waiting for the next tag bump |
+| Job as a plain resource, name hashed from its spec | no marker ConfigMap needed; migration-only edits (A7 TLS toggles, backoffLimit) produce a new Job name, so they run immediately instead of wedging on an immutable field |
+| Hook points at the service chart (`migrationsOnly`), not a copy of its Job | one Job template, owned by the schema owner; value layering byte-identical to the child |
 | The other `main` readers included | `backend-crons`, `notifications-orchestrator`, `monitoring-cronjobs` read `main_<env>` today; leaving them out breaks the stated guarantee |
 
 ## What is in this folder
@@ -108,10 +124,8 @@ Restore them with a `sed` before using any of this in harmony.
 ## Rendering it
 
 ```bash
-helm lint  gitops/charts/tenant-parent-harmony --set mode=parent
-helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml          # the parent role
-helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml \
-  --set mode=migrations --set migrations.job.image=<tag>                                       # the Job that lands on the tenant
+helm lint  gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml
+helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml          # 11 children + the hook app
 helm template t gitops/charts/tenant-parent-harmony -f ci/armk-prod-use2-values.yaml \
   --set region.role=standby | grep -c tenant-migrations    # → 0, no migration in the DR region
 ```
@@ -123,8 +137,6 @@ generate today; the only differences may be the `image.tag` parameter and
 
 ## Still to settle
 
-- Point the hook at this chart (`mode=migrations`) or at `charts/backend` with a
-  `migrationsOnly` flag.
 - `apollo-router` as a child (wave 5, keeps "router after subgraphs") or left in
   its own ApplicationSet.
 - The cutover itself: harmony's 8 live Applications per tenant each carry

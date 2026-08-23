@@ -1,13 +1,9 @@
 # tenant-parent-harmony — the chart as it would be published to platform ECR as
 # readyon-helm-charts/tenant-parent and consumed by applicationsets/<env>/tenant-parent.yaml.
 #
-# ONE chart, TWO roles (see README):
-#   mode: parent      → the PreSync hook Application + the child Applications
-#   mode: migrations  → backend's migration Job + the state ConfigMap
-# The hook Application points back at this same chart with mode=migrations,
-# because a Job cannot cross clusters on its own: every resource of an
-# Application lands on that Application's single spec.destination.
-mode: parent
+# It renders Application objects and nothing else: the children, and one PreSync
+# hook Application per migrating service that points at that service's own chart
+# with migrationsOnly=true (see README).
 
 # ---------------------------------------------------------------- identity ---
 # Supplied by the ApplicationSet generator (configs/tenants.yaml × configs/regions.yaml).
@@ -109,19 +105,12 @@ children:
 # ----------------------------------------------------------- the migration ---
 migrations:
   enabled: true
-  # Which child's image tag the migration runs with (backend owns `main`).
-  from: backend
   # The hook Application's own retry. 0 = exactly one migration attempt per
   # parent attempt, so parent retries are not multiplied by app retries.
   retryLimit: 0
-  # mode=migrations only: rendered from the backend chart's own values so the
-  # Job matches what backend runs today (TLS toggles, pgBouncer bypass, RAD wait).
-  job:
-    backoffLimit: 3
-    activeDeadlineSeconds: 10800
-    ttlSecondsAfterFinished: 300
-    command: ["npm", "run", "db:migrate"]
-    env: {}
-    externalSecretName: ""    # <fullname>-migrations-db-secrets
-    image: ""                 # resolved from the tenant file's image.tag
-    repository: ""            # e.g. <NONPROD_ACCOUNT_ID>.dkr.ecr.../readyon-backend
+  # Children that own a schema. Each becomes a PreSync hook Application pointing
+  # at that child's chart (same valueFiles/values) with migrationsOnly=true.
+  # `wave` orders hooks: services sharing a database go in later waves.
+  services:
+    - name: backend
+      wave: "0"

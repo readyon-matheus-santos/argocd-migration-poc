@@ -20,7 +20,7 @@ SERVICES=(backend subgraph-a subgraph-b)
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 
 tenant_app_list() { local t="$1" s; for s in postgres backend subgraph-a subgraph-b; do echo "$s-$t"; done; }
-layer_apps() { echo "tenant-migrations-acme tenant-migrations-globex"; }
+hook_apps() { local t s; for t in acme globex; do for s in backend subgraph-a subgraph-b; do echo "tenant-migrations-$s-$t"; done; done; }
 
 # converge_baseline <profile> <releaseId>
 converge_baseline() {
@@ -33,14 +33,13 @@ converge_baseline() {
   hard_refresh root
   wait_apps_synced_healthy 180 root
   local apps=(); for t in acme globex; do while read -r a; do apps+=("$a"); done < <(tenant_app_list "$t"); done
-  if [[ "$profile" == s1 || "$profile" == aoa ]]; then
+  if [[ "$profile" == aoa ]]; then
     # shellcheck disable=SC2046
-    wait_apps_absent 300 $(layer_apps)
+    apps+=(tenant-acme tenant-globex $(hook_apps))
   else
     # shellcheck disable=SC2046
-    apps+=($(layer_apps))
+    wait_apps_absent 300 tenant-acme tenant-globex $(hook_apps)
   fi
-  if [[ "$profile" == aoa ]]; then apps+=(tenant-acme tenant-globex); else wait_apps_absent 300 tenant-acme tenant-globex; fi
   if [[ "$profile" == aoa ]]; then
     local head; head="$(git -C "$LAB_ROOT" rev-parse HEAD)"
     hard_refresh tenant-acme tenant-globex 2>/dev/null || true

@@ -15,10 +15,10 @@ The lab repo is itself the ArgoCD source: everything ArgoCD reads lives under
 CONTROL cluster (kind: argocd-migration-poc)          ~ harmony-platform-use2
   ArgoCD + every Application object
   └─ tenant-<tenant>            the parent, one per tenant (chart: tenant-parent, renders ONLY Applications)
-       ├─ PreSync ─► tenant-migrations-<tenant>       an Application, destination = workload cluster
-       │                chart: tenant-migrations = each migrating service's OWN chart as a
-       │                dependency with migrationsOnly=true → its migration Job as a plain
-       │                resource (sync-waves for same-DB order; name hashed per release)
+       ├─ PreSync ─► tenant-migrations-<svc>-<tenant>  one Application per schema owner,
+       │                destination = workload cluster, source = that service's OWN chart
+       │                with the child's value files + migrationsOnly=true → only its migration
+       │                Job, as a plain resource named per release (hook waves order same-DB)
        └─ Sync ────► backend-<tenant> (wave 2), subgraph-a/-b-<tenant> (wave 4)
 
 WORKLOAD cluster (kind: ...-workload)                 ~ harmony-nonprod-use2
@@ -40,8 +40,8 @@ database. Measured here: a PreSync Job with an explicit tenant namespace ran on
 the control cluster even though the same namespace existed on the workload
 cluster. ArgoCD has no per-resource destination (argo-cd#8944 is still open).
 
-Why the migration Jobs are *plain resources* of that Application and not hooks
-inside it: hooks are excluded from the sync comparison and from app health, so
+Why the migration Jobs are *plain resources* of those Applications (the service
+chart's `migrationsOnly` switch) and not hooks inside them: hooks are excluded from the sync comparison and from app health, so
 an app containing only hooks manages nothing — it reports Synced/Healthy on
 creation, never syncs, and the Jobs never run while the parent reports success.
 As plain resources they are the app's state, so ArgoCD's built-in Job health
@@ -131,9 +131,7 @@ deleting them.
 ```
 bootstrap/   cluster/ArgoCD install, repo secret, root app template, status/teardown
 gitops/      what ArgoCD reads: root chart + AppSets, charts, values, tenants.yaml
-  charts/tenant-parent/          the working demo: parent chart, renders the hook Application + children
-  charts/tenant-migrations/      wrapper chart the hook Application points at: the service charts as
-                                 aliased dependencies, migrationsOnly=true
+  charts/tenant-parent/          the working demo: parent chart, renders the hook Applications + children
   charts/fake-service/           the stand-in service; migrationsOnly renders just its migration Job
   charts/tenant-parent-harmony/  the deliverable: the chart + ApplicationSet as they
                                  would ship to harmony, with the real per-service

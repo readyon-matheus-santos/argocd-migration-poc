@@ -636,14 +636,10 @@ spec:
                       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.{{.namespace}}.svc.cluster.local:4318/v1/traces"
                     {{- end }}
               migrations:
-                from: backend
                 retryLimit: 0
-                job:
-                  repository: {{.accountId}}.dkr.ecr.{{.regionName}}.amazonaws.com/readyon-backend
-                  externalSecretName: backend-migrations-db-secrets
-                  env:
-                    TYPEORM_SSL_MODE: "true"
-                    NODE_TLS_REJECT_UNAUTHORIZED: "0"
+                services:
+                  - name: backend
+                    wave: "0"
 
         - repoURL: https://github.com/ReadyOn-Inc/readyon-harmony.git
           targetRevision: main

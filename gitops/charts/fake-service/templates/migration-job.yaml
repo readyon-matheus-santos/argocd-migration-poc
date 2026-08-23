@@ -6,8 +6,8 @@ Two shapes from one template:
   migrationsOnly=false (harmony today / S1): the service's own PreSync hook,
   BeforeHookCreation, fixed name. Runs on every sync of the service app.
 
-  migrationsOnly=true (the design): a PLAIN resource rendered by the
-  tenant-migrations wrapper chart, inside the parent's PreSync hook Application.
+  migrationsOnly=true (the design): a PLAIN resource, the only thing rendered,
+  inside the parent's per-service PreSync hook Application.
   Plain rather than a hook because an app whose contents are all hooks manages
   nothing — it reports Synced/Healthy on creation and never runs them. As a
   managed resource the Job's own health gates the parent.
@@ -30,9 +30,7 @@ metadata:
     {{- include "fake-service.labels" . | nindent 4 }}
     job-role: migration
   annotations:
-    {{- if .Values.migrationsOnly }}
-    argocd.argoproj.io/sync-wave: {{ .Values.migrations.wave | default "0" | quote }}
-    {{- else }}
+    {{- if not .Values.migrationsOnly }}
     argocd.argoproj.io/hook: PreSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     {{- end }}

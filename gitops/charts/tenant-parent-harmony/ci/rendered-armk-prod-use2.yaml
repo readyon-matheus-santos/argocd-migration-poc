@@ -910,11 +910,11 @@ spec:
       kind: Deployment
 
 ---
-# Source: tenant-parent-harmony/templates/migration-hook-application.yaml
+# Source: tenant-parent-harmony/templates/migration.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: tenant-migrations-armk-prod-use2
+  name: tenant-migrations-backend-armk-prod-use2
   namespace: argocd
   labels:
     app: tenant-migrations
@@ -929,42 +929,72 @@ spec:
   project: "production"
   sources:
     - repoURL: "<PLATFORM_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com"
-      chart: readyon-helm-charts/tenant-parent
-      targetRevision: "0.1.0"
+      chart: "readyon-helm-charts/backend"
+      targetRevision: "1.10.8"
       helm:
+        valueFiles:
+          - $values/values/_base/backend.yaml
+          - $values/values/shared-prod.yaml
+          - $values/values/_regions/use2/backend-region.yaml
+          - $values/values/_tenants/armk-prod/backend-tenant.yaml
+        ignoreMissingValueFiles: true
         values: |
-          # same chart, migrations role
-          mode: migrations
-          tenant: armk-prod
-          client: armk
-          env: prod
-          namespace: armk-prod
-          isolationMode: isolated
-          dbEnv: ""
-          region:
-            shortName: use2
-            name: us-east-2
+          aws:
             accountId: "<PROD_ACCOUNT_ID>"
-          migrations:
-            from: backend
-            job:
-              activeDeadlineSeconds: 10800
-              backoffLimit: 3
-              command:
-              - npm
-              - run
-              - db:migrate
-              env:
-                NODE_TLS_REJECT_UNAUTHORIZED: "0"
-                TYPEORM_SSL_MODE: "true"
-              externalSecretName: backend-migrations-db-secrets
-              image: ""
-              repository: <PROD_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/readyon-backend
-              ttlSecondsAfterFinished: 300
-              image: "v1.0.7-prod-20260817-235744-4105f710"
-    # $values is required even though this role reads no value files today:
-    # the chart's valueFiles may reference it, and a missing ref source makes the
-    # app go Unknown/ComparisonError, which would hang the parent's PreSync.
+            region: "us-east-2"
+          # Per-app credentials templating
+          environment: "prod"
+          client: "armk"
+          isolationMode: isolated
+          env:
+            # Read-only source DB name for the associateGroupId backfill
+            # migration (readyon-ui #25185), run by THIS backend PreSync Job.
+            # The migration opens a second, read-only connection to the
+            # tenant's associates-group DB; host, port, credentials and TLS
+            # are inherited from the Job's own TYPEORM_* (the AG DB and the
+            # main DB sit on the same cluster in every tenant), so the
+            # database NAME is the only thing it needs. It lands in the Job
+            # because the backend chart merges `env` into the migration Job.
+            #
+            # Derived, not hardcoded per tenant: this MUST resolve to THIS
+            # tenant's AG DB. The expression mirrors the associates-group
+            # subgraph's own DB name (the chart's common.dbFullName, baseName
+            # associates_group):
+            #   shared             -> {client}_associates_group_{env}
+            #   isolated/dedicated -> associates_group_{env}
+            # Prod is NOT uniform: armk/hilt/mgm are isolated/dedicated and
+            # get NO client prefix (associates_group_prod, _uat, _sbx), while
+            # rdyn-prod is `shared` and does (rdyn_associates_group_prod).
+            # common.dbFullName special-cases only "shared" — `dedicated`
+            # takes the same unprefixed branch as `isolated`, so test on
+            # "shared", never on the mode list.
+            #
+            # Anchored on `.env` alone (no dbEnv term): RAD is a nonprod-only
+            # construct, no prod tenant carries `dbEnv`, and nothing under
+            # values/ sets the chart's dbEnvironment — so the env axis IS the
+            # database axis here.
+            AG_DATABASE: '""""_""associates_group_""'
+            ""
+            OTEL_ENDPOINT: "http://otel-collector-collector.armk-prod.svc.cluster.local:4318"
+            OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://otel-collector-collector.armk-prod.svc.cluster.local:4318/v1/logs"
+            OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otel-collector-collector.armk-prod.svc.cluster.local:4318/v1/metrics"
+            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-collector-collector.armk-prod.svc.cluster.local:4318/v1/traces"
+            ""
+            AWS_S3_DOCUMENTS_BUCKET: "armk-prod-documents-us-east-2-<PROD_ACCOUNT_ID>"
+            AWS_S3_SNOWFLAKE_BUCKET: "armk-prod-snowflake-us-east-2-<PROD_ACCOUNT_ID>"
+          serviceAccount:
+            create: true
+            name: backend
+            annotations:
+              eks.amazonaws.com/role-arn: "arn:aws:iam::<PROD_ACCOUNT_ID>:role/harmony-prod-use2-armk-prod-backend-role"
+          region:
+            role: ""
+            replicaMultiplier: ""
+        parameters:
+          - name: migrationsOnly
+            value: "true"
+          - name: image.tag
+            value: "v1.0.7-prod-20260817-235744-4105f710"
     - repoURL: "https://github.com/ReadyOn-Inc/readyon-harmony.git"
       targetRevision: "main"
       ref: values

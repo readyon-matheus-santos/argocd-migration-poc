@@ -564,14 +564,7 @@ children:
 
 migrations:
   enabled: true
-  from: backend
   retryLimit: 0
-  job:
-    backoffLimit: 3
-    activeDeadlineSeconds: 10800
-    ttlSecondsAfterFinished: 300
-    repository: <PROD_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/readyon-backend
-    externalSecretName: backend-migrations-db-secrets
-    env:
-      TYPEORM_SSL_MODE: "true"
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+  services:
+    - name: backend
+      wave: "0"

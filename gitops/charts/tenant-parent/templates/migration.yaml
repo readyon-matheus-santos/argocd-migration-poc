@@ -1,68 +1,69 @@
 {{- /*
-The tenant's migrations, as the parent's ONE PreSync hook: an Application whose
-destination is the tenant cluster and whose source is the tenant-migrations
-wrapper chart. It has to be an Application and not a Job: hooks are resources of
-the parent and land on the parent's destination (the control cluster, where
-Application CRs live), never on the tenant cluster. An Application carries its
-own destination, so it is the only shape that reaches the tenant.
+The tenant's migrations: one PreSync hook *Application* per service that owns a
+schema, each pointing at that service's OWN chart (same value files as its
+child) with migrationsOnly=true, so the service chart renders only its migration
+Job — as a plain resource named per release, not a hook. No second copy of any
+Job template exists.
 
-The parent's PreSync completes only when this app reports Healthy, which needs
-the Application health customization in bootstrap/argocd-cm-patch.yaml.
+An Application and not a Job: hooks are resources of the parent and land on the
+parent's destination (the control cluster, where Application CRs live), never
+on the tenant cluster. An Application carries its own destination.
 
-Same-database services migrate in sequence (later wave); different databases in
-parallel (same wave).
+Same-database services migrate in sequence: hook Applications carry sync-waves
+and ArgoCD orders hooks within a phase by wave. The parent's PreSync completes
+only when every hook app reports Healthy (bootstrap/argocd-cm-patch.yaml).
 */ -}}
+{{- $repo := required "repoURL" .Values.repoURL }}
+{{- $rev := required "targetRevision" .Values.targetRevision }}
 {{- $svcs := list "backend" "subgraph-a" "subgraph-b" -}}
 {{- $dbs := dict "backend" "main" "subgraph-a" "main" "subgraph-b" "subgraph_b" -}}
 {{- $parsed := dict -}}
 {{- range $name := $svcs -}}{{- $_ := set $parsed $name ((index $.Values.tenantFiles $name | default "") | fromYaml) -}}{{- end -}}
 {{- $releaseId := (get (get $parsed "backend") "releaseId") | default "r0" -}}
 {{- $seen := dict -}}
+{{- range $name := $svcs }}
+{{- $cfg := get $parsed $name }}
+{{- $db := get $dbs $name }}
+{{- $wave := int (get $seen $db | default 0) }}
+{{- $_ := set $seen $db (add $wave 1) }}
+---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: tenant-migrations-{{ .Values.tenant }}
+  name: tenant-migrations-{{ $name }}-{{ $.Values.tenant }}
   namespace: argocd
   labels:
     app.kubernetes.io/name: tenant-migrations
-    tenant: {{ .Values.tenant | quote }}
+    tenant: {{ $.Values.tenant | quote }}
   annotations:
     argocd.argoproj.io/hook: PreSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: {{ $wave | quote }}
   # deliberately NO resources-finalizer: BeforeHookCreation deletes this object
-  # on every parent sync, and a finalizer would cascade into the running Jobs.
+  # on every parent sync, and a finalizer would cascade into the running Job.
 spec:
   project: default
-  source:
-    repoURL: {{ .Values.repoURL }}
-    targetRevision: {{ .Values.targetRevision }}
-    path: gitops/charts/tenant-migrations
-    helm:
-      values: |
-        {{- range $name := $svcs }}
-        {{- $cfg := get $parsed $name }}
-        {{- $db := get $dbs $name }}
-        {{- $wave := int (get $seen $db | default 0) }}
-        {{- $_ := set $seen $db (add $wave 1) }}
-        {{ $name }}:
-          enabled: true
+  sources:
+    - repoURL: {{ $repo }}
+      targetRevision: {{ $rev }}
+      path: gitops/charts/fake-service
+      helm:
+        valueFiles:
+          - $values/gitops/values/_base/{{ $name }}.yaml
+          - $values/gitops/values/_tenants/{{ $.Values.tenant }}/{{ $name }}.yaml
+        values: |
           migrationsOnly: true
-          name: {{ $name }}
-          db:
-            name: {{ $db }}
           releaseId: {{ $releaseId }}
           version: {{ get $cfg "version" }}
-          migrations:
-            sleepSeconds: {{ (get $cfg "migrations") | default dict | dig "sleepSeconds" 2 }}
-            fail: {{ (get $cfg "migrations") | default dict | dig "fail" false }}
-            wave: {{ $wave | quote }}
-        {{- end }}
+    - repoURL: {{ $repo }}
+      targetRevision: {{ $rev }}
+      ref: values
   destination:
-    name: {{ .Values.childCluster }}
-    namespace: {{ .Values.namespace }}
+    name: {{ $.Values.childCluster }}
+    namespace: {{ $.Values.namespace }}
   syncPolicy:
     automated: {prune: true, selfHeal: true}
     syncOptions: [CreateNamespace=true]
     retry:
       limit: 0
+{{- end }}

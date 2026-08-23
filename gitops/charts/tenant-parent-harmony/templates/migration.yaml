@@ -1,0 +1,85 @@
+{{- if include "tp.migrationsActive" . }}
+{{- /*
+The tenant's migrations: one PreSync hook *Application* per service that owns a
+schema (today: backend), each pointing at that service's OWN chart with the same
+value layers its child uses, plus migrationsOnly=true. The service chart then
+renders only its migration Job (a plain resource, named per release) and the
+ExternalSecret the Job reads. No second copy of the Job template exists anywhere.
+
+Why an Application and not a Job: hooks are resources of the parent, and every
+resource of an Application is applied to that Application's single
+spec.destination — the platform cluster, the only place Application CRs exist. A
+Job hook would run there: no tenant database, no tenant secrets, wrong AWS
+account. Verified in this lab, twice. ArgoCD has no per-resource destination
+(argo-cd#8944, open), so only an Application — which carries its own destination
+— reaches the tenant, and it keeps the PreSync ordering exactly.
+
+Services sharing a database migrate in sequence: the hook Applications carry
+sync-waves, and ArgoCD orders hooks within a phase by wave.
+
+The parent's PreSync completes only when each hook app reports Healthy, which
+needs the argocd-cm `Application` health customization (Synced+Healthy ⇒
+Healthy, and still Healthy when a stale operationState says Failed).
+
+No resources-finalizer: BeforeHookCreation deletes this object on every parent
+sync, and a finalizer would turn that into a cascade delete of the running Job.
+*/ -}}
+{{- $root := . }}
+{{- range $svc := .Values.migrations.services }}
+{{- $key := $svc.name }}
+{{- $cfg := index $root.Values.children $key }}
+{{- if not $cfg }}{{ fail (printf "tenant-parent: migrations.services[%s] is not a child" $key) }}{{ end }}
+{{- $tag := include "tp.tag" (dict "root" $root "key" $key "required" true) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenant-migrations-{{ $cfg.appName }}-{{ $root.Values.tenant }}-{{ $root.Values.region.shortName }}
+  namespace: argocd
+  labels:
+    app: tenant-migrations
+    tenant: {{ $root.Values.client | quote }}
+    env: {{ $root.Values.env | quote }}
+    region: {{ $root.Values.region.shortName | quote }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: {{ $svc.wave | default "0" | quote }}
+spec:
+  project: {{ $root.Values.childProject | quote }}
+  sources:
+    - repoURL: {{ $root.Values.chartRepoURL | quote }}
+      chart: {{ $cfg.chart | quote }}
+      targetRevision: {{ $cfg.targetRevision | quote }}
+      helm:
+        {{- with $cfg.valueFiles }}
+        valueFiles:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ignoreMissingValueFiles: true
+        {{- with $cfg.values }}
+        values: |
+          {{- . | trimSuffix "\n" | nindent 10 }}
+        {{- end }}
+        parameters:
+          - name: migrationsOnly
+            value: "true"
+          - name: image.tag
+            value: {{ $tag | quote }}
+    - repoURL: {{ $root.Values.valuesSource.repoURL | quote }}
+      targetRevision: {{ $root.Values.valuesSource.targetRevision | quote }}
+      ref: values
+  destination:
+    name: {{ $root.Values.region.cluster | quote }}
+    namespace: {{ $root.Values.namespace | quote }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: {{ $root.Values.migrations.retryLimit | default 0 }}
+{{- end }}
+{{- end }}

@@ -1,4 +1,3 @@
-{{- if eq (.Values.mode | default "parent") "parent" }}
 {{- /*
 The tenant's service Applications, rendered in the parent's Sync phase — so they
 are applied only after the PreSync hook (the migration) succeeded.
@@ -77,6 +76,5 @@ spec:
   ignoreDifferences:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-{{- end }}
 {{- end }}
 {{- end }}

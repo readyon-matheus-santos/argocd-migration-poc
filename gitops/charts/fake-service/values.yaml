@@ -17,20 +17,17 @@ db:
   secretName: postgres-creds
 
 # Render ONLY the migration Job, as a plain (non-hook) resource named per
-# release. Set by the tenant-migrations wrapper chart, which runs inside the
-# parent's PreSync hook Application on the tenant cluster. Never set it in a
-# service's own values.
+# release. Set by the parent's PreSync hook Application for this service, which
+# runs on the tenant cluster. Never set it in a service's own values.
 migrationsOnly: false
 
 # Per-service PreSync migration Job owned by THIS service's Application
-# (the S1 baseline shape). Off in the default profile: the tenant-migrations
-# wrapper carries the Jobs instead.
+# (the S1 baseline shape). Off in the default profile: the parent's hook
+# Applications carry the Jobs instead.
 migrations:
   enabled: false
   sleepSeconds: 2
   fail: false
-  # migrationsOnly: sync-wave inside the migrations app (same DB => later wave)
-  wave: "0"
   image:
     repository: postgres
     tag: "16"
