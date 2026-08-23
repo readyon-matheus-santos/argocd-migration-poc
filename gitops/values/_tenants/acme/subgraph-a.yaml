@@ -1,5 +1,5 @@
-releaseId: r130
-version: v1
+releaseId: r131
+version: v2
 migrations:
-  sleepSeconds: 2
+  sleepSeconds: 30
   fail: false
