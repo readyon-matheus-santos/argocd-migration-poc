@@ -4,6 +4,14 @@
 
 k() { kubectl --request-timeout=20s "$@"; }
 
+# Tenant objects (pods, Jobs, postgres) live on the WORKLOAD cluster when it
+# exists (make workload-cluster); Applications always live on the control cluster.
+WORKLOAD_KUBECONFIG="${WORKLOAD_KUBECONFIG:-$LAB_ROOT/.cache/kubeconfig-workload}"
+wk() {
+  if [[ -f "$WORKLOAD_KUBECONFIG" ]]; then kubectl --kubeconfig "$WORKLOAD_KUBECONFIG" --request-timeout=20s "$@"
+  else k "$@"; fi
+}
+
 hard_refresh() { # hard_refresh <app>...
   local app
   for app in "$@"; do
@@ -53,7 +61,7 @@ wait_apps_exist() { # wait_apps_exist <timeout> <app>...
 
 
 psql_tenant() { # psql_tenant <tenant> <db> <sql>
-  k exec -n "$1" deploy/postgres -- psql -U poc -d "$2" -At -c "$3"
+  wk exec -n "$1" deploy/postgres -- psql -U poc -d "$2" -At -c "$3"
 }
 
 wait_apps_absent() { # wait_apps_absent <timeout> <app>...
@@ -103,9 +111,9 @@ dump_forensics() { # dump_forensics <dir>
   k get applications.argoproj.io -n argocd -o yaml > "$d/applications.yaml" 2>/dev/null
   local t
   for t in acme globex; do
-    k get pods,jobs -n "$t" -o wide > "$d/$t-objects.txt" 2>&1 || true
-    k describe jobs -n "$t" > "$d/$t-jobs-describe.txt" 2>&1 || true
-    k describe pods -n "$t" > "$d/$t-pods-describe.txt" 2>&1 || true
+    wk get pods,jobs -n "$t" -o wide > "$d/$t-objects.txt" 2>&1 || true
+    wk describe jobs -n "$t" > "$d/$t-jobs-describe.txt" 2>&1 || true
+    wk describe pods -n "$t" > "$d/$t-pods-describe.txt" 2>&1 || true
     psql_tenant "$t" main "SELECT svc,release_id,version,started_at,finished_at,extract(epoch from started_at) AS s,extract(epoch from finished_at) AS f FROM migration_log ORDER BY started_at" > "$d/$t-ledger-main.txt" 2>&1 || true
     psql_tenant "$t" subgraph_b "SELECT svc,release_id,version,started_at,finished_at,extract(epoch from started_at) AS s,extract(epoch from finished_at) AS f FROM migration_log ORDER BY started_at" > "$d/$t-ledger-subgraph_b.txt" 2>&1 || true
   done
@@ -114,7 +122,7 @@ dump_forensics() { # dump_forensics <dir>
 wait_pods_ready() { # wait_pods_ready <timeout> <tenant> <releaseId>  (all backend/subgraph pods carry releaseId and are Ready; no other release pods remain)
   local timeout="$1" t="$2" rel="$3" elapsed=0 bad
   while (( elapsed < timeout )); do
-    bad="$(k get pods -n "$t" -l 'app.kubernetes.io/name in (backend,subgraph-a,subgraph-b),job-role!=migration' -o jsonpath='{range .items[*]}{.metadata.labels.release-id}{"/"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{" "}{end}' 2>/dev/null | tr ' ' '\n' | grep -v "^$rel/True$" | grep -v '^$' || true)"
+    bad="$(wk get pods -n "$t" -l 'app.kubernetes.io/name in (backend,subgraph-a,subgraph-b),job-role!=migration' -o jsonpath='{range .items[*]}{.metadata.labels.release-id}{"/"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{" "}{end}' 2>/dev/null | tr ' ' '\n' | grep -v "^$rel/True$" | grep -v '^$' || true)"
     [[ -z "$bad" ]] && return 0
     sleep 3; elapsed=$((elapsed + 3))
   done
