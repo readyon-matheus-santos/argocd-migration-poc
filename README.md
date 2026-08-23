@@ -133,9 +133,11 @@ gitops/      what ArgoCD reads: root chart + AppSets, charts, values, tenants.ya
   charts/tenant-parent/          the working demo: parent chart, renders the hook Application + children
   charts/tenant-migrations/      what the hook Application deploys: the tenant's migration Jobs
   charts/fake-service/           the stand-in service (Deployment + optional per-app hook Job, S1 baseline)
-  charts/tenant-parent-harmony/  the deliverable: the chart + ApplicationSet as they
-                                 would ship to harmony, with the real per-service
-                                 values copied in (AWS account ids redacted)
+
+The production charts that came out of this lab live in readyon-harmony-charts
+(`charts/tenant-parent`, `charts/tenant-migrations`) and are consumed by
+readyon-harmony's `applicationsets/<env>/tenant-parent.yaml`; they are not
+mirrored here.
 scripts/     run.sh (driver), assert.sh, seed.sh, lint.sh, lib/ (env, kube, git, release, sampler)
 runs/        evidence per scenario (gitignored)
 ```
