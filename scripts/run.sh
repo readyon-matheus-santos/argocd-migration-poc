@@ -34,8 +34,9 @@ converge_baseline() {
   wait_apps_synced_healthy 180 root
   local apps=(); for t in acme globex; do while read -r a; do apps+=("$a"); done < <(tenant_app_list "$t"); done
   if [[ "$profile" == aoa ]]; then
-    # shellcheck disable=SC2046
-    apps+=(tenant-acme tenant-globex $(hook_apps))
+    # Hook Applications are not part of the parent's sync comparison, so they
+    # only exist once a sync has run; an unchanged baseline need not have them.
+    apps+=(tenant-acme tenant-globex)
   else
     # shellcheck disable=SC2046
     wait_apps_absent 300 tenant-acme tenant-globex $(hook_apps)
